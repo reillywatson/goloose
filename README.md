@@ -2,10 +2,12 @@ goloose is a fast way to convert between incompatible types in Go.
 
 Basically it tries to replicate this function, only faster:
 
+```go
 func Convert(in, out interface{}) {
 	b, _ := json.Marshal(in)
 	json.Unmarshal(b, &out)
 }
+```
 
 Rather than using JSON as an intermediary, goloose uses reflection over the input and output structs to set values directly.
 
