@@ -129,7 +129,7 @@ func TestToStructZerosThingsOut(t *testing.T) {
 	}
 }
 
-func XTestToStructIgnoresCase(t *testing.T) {
+func TestToStructIgnoresCase(t *testing.T) {
 	type foo struct {
 		A int `json:"ABC_DEF"`
 	}
@@ -261,5 +261,45 @@ func TestPointerToInt(t *testing.T) {
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
+	}
+}
+
+func TestEmbeddedStructPtr(t *testing.T) {
+	type Bar struct {
+		Baz string
+	}
+	type Foo struct {
+		*Bar
+	}
+	var a, b Foo
+	m := map[string]interface{}{
+		"Baz": "cancel",
+	}
+	ToStruct(m, &a)
+	toStructSlow(m, &b)
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %v\nExpected: %v", a, b)
+	}
+}
+
+func TestEmbeddedStructPtrDoesntAllocAbsentFields(t *testing.T) {
+	type Bar struct {
+		Baz string
+	}
+	type Quux struct {
+		A string
+	}
+	type Foo struct {
+		*Quux
+		*Bar
+	}
+	var a, b Foo
+	m := map[string]interface{}{
+		"Baz": "cancel",
+	}
+	ToStruct(m, &a)
+	toStructSlow(m, &b)
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %v\nExpected: %v", a, b)
 	}
 }

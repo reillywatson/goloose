@@ -315,11 +315,13 @@ func cachedTypeFields(t reflect.Type) []field {
 	return f
 }
 
-func fieldByIndex(v reflect.Value, index []int) reflect.Value {
+func fieldByIndex(v reflect.Value, index []int, alloc bool) reflect.Value {
 	for _, i := range index {
 		if v.Kind() == reflect.Ptr {
 			if v.IsNil() {
-				return reflect.Value{}
+				if alloc {
+					v.Set(reflect.New(v.Type().Elem()))
+				}
 			}
 			v = v.Elem()
 		}

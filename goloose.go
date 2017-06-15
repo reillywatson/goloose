@@ -95,7 +95,7 @@ func toStructImpl(in, out reflect.Value) error {
 		}
 		fields := cachedTypeFields(in.Type())
 		for _, field := range fields {
-			val := fieldByIndex(in, field.index)
+			val := fieldByIndex(in, field.index, false)
 			if field.omitEmpty && isEmptyValue(val) {
 				continue
 			}
@@ -121,7 +121,7 @@ func toStructImpl(in, out reflect.Value) error {
 				}
 				for _, outfield := range outFields {
 					if outfield.namelower == field.namelower {
-						err := toStructImpl(val, fieldByIndex(out, outfield.index))
+						err := toStructImpl(val, fieldByIndex(out, outfield.index, true))
 						if err != nil {
 							return err
 						}
@@ -162,7 +162,7 @@ func toStructImpl(in, out reflect.Value) error {
 				}
 				for _, field := range outFields {
 					if field.namelower == keyStr {
-						err := toStructImpl(val, fieldByIndex(out, field.index))
+						err := toStructImpl(val, fieldByIndex(out, field.index, true))
 						if err != nil {
 							return err
 						}
