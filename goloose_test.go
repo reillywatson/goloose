@@ -321,3 +321,33 @@ func TestInvalidTime(t *testing.T) {
 		t.Errorf("Got %v\nExpected: %v", aErr, bErr)
 	}
 }
+
+func TestStringJSONString(t *testing.T) {
+	type Foo struct {
+		Bar string `json:"bar,string"`
+	}
+	var a, b Foo
+	m := map[string]interface{}{
+		"bar": "\"a\"",
+	}
+	ToStruct(m, &a)
+	toStructSlow(m, &b)
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %v\nExpected: %v", a, b)
+	}
+}
+
+func TestStringJSONInt64(t *testing.T) {
+	type Foo struct {
+		Id int64 `json:"id,string"`
+	}
+	var a, b Foo
+	m := map[string]interface{}{
+		"id": "131412412412412412",
+	}
+	ToStruct(m, &a)
+	toStructSlow(m, &b)
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %v\nExpected: %v", a, b)
+	}
+}

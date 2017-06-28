@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -99,6 +100,9 @@ func toStructImpl(in, out reflect.Value) error {
 			if field.omitEmpty && isEmptyValue(val) {
 				continue
 			}
+			if field.quoted {
+				val = dequote(val)
+			}
 			if val.Kind() == reflect.Interface {
 				val = val.Elem()
 			}
@@ -121,6 +125,9 @@ func toStructImpl(in, out reflect.Value) error {
 				}
 				for _, outfield := range outFields {
 					if outfield.namelower == field.namelower {
+						if field.quoted {
+							val = dequote(val)
+						}
 						err := toStructImpl(val, fieldByIndex(out, outfield.index, true))
 						if err != nil {
 							return err
@@ -162,6 +169,9 @@ func toStructImpl(in, out reflect.Value) error {
 				}
 				for _, field := range outFields {
 					if field.namelower == keyStr {
+						if field.quoted {
+							val = dequote(val)
+						}
 						err := toStructImpl(val, fieldByIndex(out, field.index, true))
 						if err != nil {
 							return err
@@ -315,45 +325,23 @@ func timeFastPath(in, out reflect.Value) bool {
 	return false
 }
 
-func fieldName(field reflect.StructField) (string, tagOptions) {
-	name, opts := parseTag(field.Tag.Get("json"))
-	if name == "" {
-		return field.Name, opts
+func dequote(v reflect.Value) reflect.Value {
+	if v.Kind() != reflect.String {
+		return v
 	}
-	return name, opts
-}
-
-// tagOptions is the string following a comma in a struct field's "json"
-// tag, or the empty string. It does not include the leading comma.
-type tagOptions string
-
-// parseTag splits a struct field's json tag into its name and
-// comma-separated options.
-func parseTag(tag string) (string, tagOptions) {
-	if idx := strings.Index(tag, ","); idx != -1 {
-		return tag[:idx], tagOptions(tag[idx+1:])
+	str := v.String()
+	if b, err := strconv.ParseBool(str); err == nil {
+		return reflect.ValueOf(b)
 	}
-	return tag, tagOptions("")
-}
-
-// Contains reports whether a comma-separated list of options
-// contains a particular substr flag. substr must be surrounded by a
-// string boundary or commas.
-func (o tagOptions) Contains(optionName string) bool {
-	if len(o) == 0 {
-		return false
+	if i, err := strconv.ParseInt(str, 10, 64); err == nil {
+		return reflect.ValueOf(i)
 	}
-	s := string(o)
-	for s != "" {
-		var next string
-		i := strings.Index(s, ",")
-		if i >= 0 {
-			s, next = s[:i], s[i+1:]
-		}
-		if s == optionName {
-			return true
-		}
-		s = next
+	if f, err := strconv.ParseFloat(str, 64); err == nil {
+		return reflect.ValueOf(f)
 	}
-	return false
+	if !strings.HasPrefix(str, `"`) || !strings.HasSuffix(str, `"`) {
+		return v
+	}
+	str = str[1 : len(str)-1]
+	return reflect.ValueOf(str)
 }
