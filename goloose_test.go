@@ -303,3 +303,21 @@ func TestEmbeddedStructPtrDoesntAllocAbsentFields(t *testing.T) {
 		t.Errorf("Got %v\nExpected: %v", a, b)
 	}
 }
+
+func TestInvalidTime(t *testing.T) {
+	type Foo struct {
+		Time time.Time `json:"time"`
+	}
+	var a, b Foo
+	m := map[string]interface{}{
+		"time": "badtime",
+	}
+	aErr := ToStruct(m, &a)
+	bErr := toStructSlow(m, &b)
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %v\nExpected: %v", a, b)
+	}
+	if !reflect.DeepEqual(aErr, bErr) {
+		t.Errorf("Got %v\nExpected: %v", aErr, bErr)
+	}
+}

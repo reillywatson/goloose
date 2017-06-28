@@ -26,8 +26,8 @@ func toStructImpl(in, out reflect.Value) error {
 	if !in.IsValid() || !in.CanInterface() {
 		return nil
 	}
-	if customJson(in, out) {
-		return nil
+	if handled, err := customJson(in, out); handled {
+		return err
 	}
 
 	if out.Kind() == reflect.Ptr {
@@ -257,29 +257,26 @@ var timePtrType = reflect.TypeOf(&time.Time{})
 var jsonMarshalerType = reflect.TypeOf(new(json.Marshaler)).Elem()
 var jsonUnmarshalerType = reflect.TypeOf(new(json.Unmarshaler)).Elem()
 
-func customJson(in, out reflect.Value) bool {
+func customJson(in, out reflect.Value) (bool, error) {
 	if !out.CanAddr() {
-		return false
+		return false, nil
 	}
 	inOk := in.Type().Implements(jsonMarshalerType)
 	outOk := out.Addr().Type().Implements(jsonUnmarshalerType)
 	if inOk || outOk {
 		if timeFastPath(in, out) {
-			return true
+			return true, nil
 		}
 
 		b, err := json.Marshal(in.Interface())
 		if err != nil {
-			panic(err)
+			return true, err
 		}
 		outInter := out.Addr().Interface()
 		err = json.Unmarshal(b, &outInter)
-		if err != nil {
-			panic(err)
-		}
-		return true
+		return true, err
 	}
-	return false
+	return false, nil
 }
 
 func timeFastPath(in, out reflect.Value) bool {
