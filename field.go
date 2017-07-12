@@ -324,6 +324,8 @@ func fieldByIndex(v reflect.Value, index []int, alloc bool) reflect.Value {
 			if v.IsNil() {
 				if alloc {
 					v.Set(reflect.New(v.Type().Elem()))
+				} else {
+					return v
 				}
 			}
 			v = v.Elem()

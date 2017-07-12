@@ -304,6 +304,25 @@ func TestEmbeddedStructPtrDoesntAllocAbsentFields(t *testing.T) {
 	}
 }
 
+func TestEmbeddedNilPointer(t *testing.T) {
+	type Bar struct {
+		Baz string
+	}
+	type Foo struct {
+		*Bar
+	}
+	var m Foo
+	var a, b Foo
+	errA := ToStruct(m, &a)
+	errB := toStructSlow(m, &b)
+	if errA != errB {
+		t.Errorf("Got err %v, expected %v", errA, errB)
+	}
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %v\nExpected: %v", a, b)
+	}
+}
+
 func TestInvalidTime(t *testing.T) {
 	type Foo struct {
 		Time time.Time `json:"time"`

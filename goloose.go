@@ -42,7 +42,6 @@ func toStructImpl(in, out reflect.Value) error {
 		return nil
 	}
 	if out.Kind() == reflect.Interface {
-
 		if out.IsNil() {
 			var outVal reflect.Value
 			inType := in.Type()
@@ -128,6 +127,9 @@ func toStructImpl(in, out reflect.Value) error {
 						if field.quoted {
 							val = dequote(val)
 						}
+						if val.Kind() == reflect.Ptr && val.IsNil() {
+							continue
+						}
 						err := toStructImpl(val, fieldByIndex(out, outfield.index, true))
 						if err != nil {
 							return err
@@ -171,6 +173,9 @@ func toStructImpl(in, out reflect.Value) error {
 					if field.namelower == keyStr {
 						if field.quoted {
 							val = dequote(val)
+						}
+						if val.Kind() == reflect.Ptr && val.IsNil() {
+							continue
 						}
 						err := toStructImpl(val, fieldByIndex(out, field.index, true))
 						if err != nil {
