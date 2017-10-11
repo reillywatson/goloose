@@ -10,7 +10,7 @@ import (
 )
 
 func ToStruct(in, out interface{}) error {
-	if in == nil {
+	if isNil(reflect.ValueOf(in)) {
 		return nil
 	}
 

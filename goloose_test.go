@@ -394,3 +394,19 @@ func TestEmbeddedFunc(t *testing.T) {
 		t.Errorf("Expected %s, got %s", b.Bar, a.Bar)
 	}
 }
+
+func TestNilNondestructive(t *testing.T) {
+	type Foo struct {
+		Bar string `json:"bar"`
+	}
+	var a, b Foo
+	a.Bar = "test"
+	b.Bar = "test"
+
+	var m map[string]interface{}
+	ToStruct(m, &a)
+	toStructSlow(m, &b)
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %v\nExpected: %v", a, b)
+	}
+}
