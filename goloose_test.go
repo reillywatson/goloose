@@ -370,3 +370,27 @@ func TestStringJSONInt64(t *testing.T) {
 		t.Errorf("Got %v\nExpected: %v", a, b)
 	}
 }
+
+func TestEmbeddedFunc(t *testing.T) {
+	type Foo struct {
+		Bar string     `json:"bar"`
+		Fn  func() int `json:"-"`
+	}
+	fn := func() int { return 1 }
+	var a, b Foo
+	a.Fn = fn
+	b.Fn = fn
+	m := map[string]interface{}{"bar": "a", "Fn": "2"}
+	ToStruct(m, &a)
+	toStructSlow(m, &b)
+	// verify neither func is nil
+	if a.Fn() != 1 {
+		t.Errorf("Expected 1, got %d", a.Fn())
+	}
+	if b.Fn() != 1 {
+		t.Errorf("Expected 1, got %d", b.Fn())
+	}
+	if a.Bar != b.Bar {
+		t.Errorf("Expected %s, got %s", b.Bar, a.Bar)
+	}
+}
