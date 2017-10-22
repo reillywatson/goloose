@@ -2,6 +2,7 @@ package goloose
 
 import (
 	"encoding/json"
+	"fmt"
 	"reflect"
 	"testing"
 	"time"
@@ -409,4 +410,22 @@ func TestNilNondestructive(t *testing.T) {
 	if !reflect.DeepEqual(a, b) {
 		t.Errorf("Got %v\nExpected: %v", a, b)
 	}
+}
+
+func TestInterfaceArray(t *testing.T) {
+	type Foo struct {
+		Bar []interface{} `json:"bar"`
+	}
+	type X struct {
+		X int `json:"x"`
+	}
+	a := Foo{Bar: []interface{}{X{X: 1}, 5}}
+	m1 := map[string]interface{}{}
+	m2 := map[string]interface{}{}
+	ToStruct(a, &m1)
+	toStructSlow(a, &m2)
+	if !reflect.DeepEqual(m1, m2) {
+		t.Errorf("Got %v\nExpected: %v", m1, m2)
+	}
+	_ = fmt.Println
 }

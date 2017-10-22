@@ -61,13 +61,7 @@ func toStructImpl(in, out reflect.Value) error {
 			case reflect.Slice:
 				outVal = reflect.New(interfaceSliceType)
 			case reflect.Interface:
-				outVal = reflect.New(in.Elem().Type())
-				err := toStructImpl(in, outVal)
-				if err != nil {
-					return err
-				}
-				out.Set(outVal.Elem())
-				return nil
+				return toStructImpl(in.Elem(), out)
 			default:
 				outVal = reflect.New(inType).Elem()
 				err := toStructImpl(in, outVal)
