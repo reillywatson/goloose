@@ -197,9 +197,7 @@ func toStructImpl(in, out reflect.Value) error {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint,
 		reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int64, reflect.Uintptr, reflect.Float32,
 		reflect.Bool, reflect.String, reflect.Float64, reflect.Complex64, reflect.Complex128:
-		if in.Type().ConvertibleTo(out.Type()) {
-			out.Set(in.Convert(out.Type()))
-		}
+		tryToConvert(in, out)
 	case reflect.Array:
 		panic("Array not supported yet!")
 	case reflect.Chan, reflect.Func:
@@ -214,6 +212,23 @@ func toStructImpl(in, out reflect.Value) error {
 		panic(fmt.Sprintf("Unknown kind %v", in.Kind()))
 	}
 	return nil
+}
+
+func tryToConvert(in, out reflect.Value) {
+	switch in.Kind() {
+	case reflect.String:
+		if out.Kind() == reflect.Bool {
+			switch in.String() {
+			case "true":
+				out.Set(reflect.ValueOf(true))
+			case "false":
+				out.Set(reflect.ValueOf(false))
+			}
+		}
+	}
+	if in.Type().ConvertibleTo(out.Type()) {
+		out.Set(in.Convert(out.Type()))
+	}
 }
 
 func toJsonType(t reflect.Type) reflect.Type {

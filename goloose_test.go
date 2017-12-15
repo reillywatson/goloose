@@ -429,3 +429,19 @@ func TestInterfaceArray(t *testing.T) {
 	}
 	_ = fmt.Println
 }
+
+func TestConvertTrueAndFalseStringsToBool(t *testing.T) {
+	type foo struct {
+		Bar string `json:"bar"`
+		Baz bool   `json:"baz"`
+		Qux *bool  `json:"qux"`
+	}
+	var a foo
+	expected := foo{Bar: "true", Baz: true, Qux: boolPtr(true)}
+	ToStruct(map[string]interface{}{"bar": "true", "baz": "true", "qux": "true"}, &a)
+	if !reflect.DeepEqual(a, expected) {
+		t.Errorf("Got %+v\nExpected: %+v", a, expected)
+	}
+}
+
+func boolPtr(b bool) *bool { return &b }
