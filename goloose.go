@@ -10,6 +10,12 @@ import (
 )
 
 func ToStruct(in, out interface{}) error {
+	return ToStructWithTransforms(in, out, nil)
+}
+
+type TransformFunc func(interface{}) interface{}
+
+func ToStructWithTransforms(in, out interface{}, transforms []TransformFunc) error {
 	if isNil(reflect.ValueOf(in)) {
 		return nil
 	}
@@ -19,13 +25,16 @@ func ToStruct(in, out interface{}) error {
 		return fmt.Errorf("out should be a pointer!")
 	}
 
-	err := toStructImpl(reflect.ValueOf(in), outVal)
+	err := toStructImpl(reflect.ValueOf(in), outVal, transforms)
 	return err
 }
 
-func toStructImpl(in, out reflect.Value) error {
+func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 	if !in.IsValid() || !in.CanInterface() {
 		return nil
+	}
+	for _, fn := range transforms {
+		in = reflect.ValueOf(fn(in.Interface()))
 	}
 	if handled, err := customJson(in, out); handled {
 		return err
@@ -35,7 +44,7 @@ func toStructImpl(in, out reflect.Value) error {
 		if out.IsNil() {
 			out.Set(reflect.New(out.Type().Elem()))
 		}
-		return toStructImpl(in, out.Elem())
+		return toStructImpl(in, out.Elem(), transforms)
 	}
 	if isNil(in) {
 		out.Set(reflect.Zero(out.Type()))
@@ -52,7 +61,7 @@ func toStructImpl(in, out reflect.Value) error {
 			switch inType.Kind() {
 			case reflect.Struct, reflect.Map:
 				outVal = reflect.MakeMap(mapStringInterfaceType)
-				err := toStructImpl(in, outVal)
+				err := toStructImpl(in, outVal, transforms)
 				if err != nil {
 					return err
 				}
@@ -61,24 +70,24 @@ func toStructImpl(in, out reflect.Value) error {
 			case reflect.Slice:
 				outVal = reflect.New(interfaceSliceType)
 			case reflect.Interface:
-				return toStructImpl(in.Elem(), out)
+				return toStructImpl(in.Elem(), out, transforms)
 			default:
 				outVal = reflect.New(inType).Elem()
-				err := toStructImpl(in, outVal)
+				err := toStructImpl(in, outVal, transforms)
 				if err != nil {
 					return err
 				}
 				out.Set(outVal)
 				return nil
 			}
-			err := toStructImpl(in, outVal)
+			err := toStructImpl(in, outVal, transforms)
 			if err != nil {
 				return err
 			}
 			out.Set(outVal.Elem())
 			return nil
 		}
-		return toStructImpl(in, out.Elem())
+		return toStructImpl(in, out.Elem(), transforms)
 	}
 	var outFields []field
 
@@ -106,7 +115,7 @@ func toStructImpl(in, out reflect.Value) error {
 					out.Set(outMap)
 				}
 				outVal := reflect.New(out.Type().Elem())
-				err := toStructImpl(val, outVal)
+				err := toStructImpl(val, outVal, transforms)
 				if err != nil {
 					return err
 				}
@@ -124,7 +133,7 @@ func toStructImpl(in, out reflect.Value) error {
 						if val.Kind() == reflect.Ptr && val.IsNil() {
 							continue
 						}
-						err := toStructImpl(val, fieldByIndex(out, outfield.index, true))
+						err := toStructImpl(val, fieldByIndex(out, outfield.index, true), transforms)
 						if err != nil {
 							return err
 						}
@@ -153,7 +162,7 @@ func toStructImpl(in, out reflect.Value) error {
 					outMap := reflect.MakeMap(out.Type())
 					out.Set(outMap)
 				}
-				err := toStructImpl(val, outVal)
+				err := toStructImpl(val, outVal, transforms)
 				if err != nil {
 					return err
 				}
@@ -171,7 +180,7 @@ func toStructImpl(in, out reflect.Value) error {
 						if val.Kind() == reflect.Ptr && val.IsNil() {
 							continue
 						}
-						err := toStructImpl(val, fieldByIndex(out, field.index, true))
+						err := toStructImpl(val, fieldByIndex(out, field.index, true), transforms)
 						if err != nil {
 							return err
 						}
@@ -189,7 +198,7 @@ func toStructImpl(in, out reflect.Value) error {
 		}
 		for i := 0; i < in.Len(); i++ {
 			val := in.Index(i)
-			err := toStructImpl(val, out.Index(i))
+			err := toStructImpl(val, out.Index(i), transforms)
 			if err != nil {
 				return err
 			}
@@ -203,9 +212,9 @@ func toStructImpl(in, out reflect.Value) error {
 	case reflect.Chan, reflect.Func:
 		// do nothing
 	case reflect.Interface:
-		return toStructImpl(in.Elem(), out)
+		return toStructImpl(in.Elem(), out, transforms)
 	case reflect.Ptr:
-		return toStructImpl(in.Elem(), out)
+		return toStructImpl(in.Elem(), out, transforms)
 	case reflect.UnsafePointer:
 		panic("UnsafePointer not supported!")
 	default:

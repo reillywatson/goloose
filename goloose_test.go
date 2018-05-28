@@ -445,3 +445,21 @@ func TestConvertTrueAndFalseStringsToBool(t *testing.T) {
 }
 
 func boolPtr(b bool) *bool { return &b }
+
+func TestErrorInMap(t *testing.T) {
+	a := map[string]interface{}{"foo": fmt.Errorf("bar")}
+	expected := map[string]interface{}{"foo": "bar"}
+	var b map[string]interface{}
+	ToStructWithTransforms(a, &b, []TransformFunc{convertErrors})
+	if !reflect.DeepEqual(expected, b) {
+		t.Errorf("Got %+v\nExpected: %+v", b, expected)
+	}
+}
+
+func convertErrors(in interface{}) interface{} {
+	err, ok := in.(error)
+	if ok {
+		return err.Error()
+	}
+	return in
+}
