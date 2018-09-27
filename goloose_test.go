@@ -463,3 +463,17 @@ func convertErrors(in interface{}) interface{} {
 	}
 	return in
 }
+
+func TestOverwriteBoolPtrWithNil(t *testing.T) {
+	type Foo struct {
+		B *bool `json:"b"`
+	}
+	x := Foo{boolPtr(false)}
+	y := Foo{boolPtr(false)}
+	msg := map[string]interface{}{"b": nil}
+	ToStruct(msg, &x)
+	toStructSlow(msg, &y)
+	if !reflect.DeepEqual(x, y) {
+		t.Errorf("Got %+v\nExpected: %+v", x, y)
+	}
+}

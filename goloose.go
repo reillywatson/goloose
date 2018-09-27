@@ -41,6 +41,10 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 	}
 
 	if out.Kind() == reflect.Ptr {
+		if (in.Kind() == reflect.Ptr || in.Kind() == reflect.Interface) && in.IsNil() && out.CanAddr() {
+			out.Set(reflect.Zero(out.Type()))
+			return nil
+		}
 		if out.IsNil() {
 			out.Set(reflect.New(out.Type().Elem()))
 		}
@@ -152,7 +156,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 			}
 			keyStr := key.String()
 			val := in.MapIndex(key)
-			if val.Kind() == reflect.Interface {
+			if val.Kind() == reflect.Interface && !val.IsNil() {
 				val = val.Elem()
 			}
 			switch out.Kind() {
