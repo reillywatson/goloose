@@ -35,6 +35,9 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 	}
 	for _, fn := range transforms {
 		in = reflect.ValueOf(fn(in.Interface()))
+		if !in.IsValid() {
+			return nil
+		}
 	}
 	if handled, err := customJson(in, out); handled {
 		return err

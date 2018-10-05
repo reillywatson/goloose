@@ -477,3 +477,20 @@ func TestOverwriteBoolPtrWithNil(t *testing.T) {
 		t.Errorf("Got %+v\nExpected: %+v", x, y)
 	}
 }
+
+func TestWriteNilWithTransforms(t *testing.T) {
+	type Foo struct {
+		B *bool `json:"b"`
+	}
+	msg := map[string]interface{}{"b": nil}
+	var x, y Foo
+	ToStructWithTransforms(msg, &x, []TransformFunc{nilTransform})
+	toStructSlow(msg, &y)
+	if !reflect.DeepEqual(x, y) {
+		t.Errorf("Got %+v\nExpected: %+v", x, y)
+	}
+}
+
+func nilTransform(in interface{}) interface{} {
+	return in
+}
