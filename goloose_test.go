@@ -8,18 +8,6 @@ import (
 	"time"
 )
 
-// slow version to compare against
-func toStructSlow(in interface{}, out interface{}) error {
-	if in == nil {
-		return nil
-	}
-	tmp, err := json.Marshal(in)
-	if err != nil {
-		return err
-	}
-	return json.Unmarshal(tmp, &out)
-}
-
 func toJson(in interface{}) string {
 	b, err := json.Marshal(in)
 	if err != nil {

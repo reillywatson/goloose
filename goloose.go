@@ -94,13 +94,8 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 			out.Set(outVal.Elem())
 			return nil
 		}
-		switch inType.Kind() {
-		case reflect.Struct, reflect.Map, reflect.Slice:
-			return toStructImpl(in, out.Elem(), transforms)
-		case reflect.Interface:
-			return toStructImpl(in.Elem(), out, transforms)
-		}
-
+		// it would be nice to handle this more performantly, but there are some edge cases that need to be considered more thoroughly!
+		return toStructSlow(in.Interface(), out.Addr().Interface())
 	}
 	var outFields []field
 
@@ -251,6 +246,18 @@ func tryToConvert(in, out reflect.Value) {
 	if in.Type().ConvertibleTo(out.Type()) {
 		out.Set(in.Convert(out.Type()))
 	}
+}
+
+// reference version to compare against
+func toStructSlow(in interface{}, out interface{}) error {
+	if in == nil {
+		return nil
+	}
+	tmp, err := json.Marshal(in)
+	if err != nil {
+		return err
+	}
+	return json.Unmarshal(tmp, &out)
 }
 
 func toJsonType(t reflect.Type) reflect.Type {
