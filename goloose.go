@@ -58,9 +58,9 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 		return nil
 	}
 	if out.Kind() == reflect.Interface {
+		inType := in.Type()
 		if out.IsNil() {
 			var outVal reflect.Value
-			inType := in.Type()
 			for inType.Kind() == reflect.Ptr {
 				inType = inType.Elem()
 			}
@@ -94,7 +94,13 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 			out.Set(outVal.Elem())
 			return nil
 		}
-		return toStructImpl(in, out.Elem(), transforms)
+		switch inType.Kind() {
+		case reflect.Struct, reflect.Map, reflect.Slice:
+			return toStructImpl(in, out.Elem(), transforms)
+		case reflect.Interface:
+			return toStructImpl(in.Elem(), out, transforms)
+		}
+
 	}
 	var outFields []field
 

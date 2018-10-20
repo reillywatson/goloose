@@ -494,3 +494,20 @@ func TestWriteNilWithTransforms(t *testing.T) {
 func nilTransform(in interface{}) interface{} {
 	return in
 }
+
+func TestSetExistingInterfaceInSlice(t *testing.T) {
+	type Foo struct {
+		Val interface{} `json:"val"`
+	}
+	type Bar struct {
+		Foo []Foo `json:"foo"`
+	}
+	msg := map[string]interface{}{"foo": []map[string]interface{}{{"val": "floob"}}}
+	x := Bar{Foo: []Foo{{Val: "qux"}}}
+	y := Bar{Foo: []Foo{{Val: "qux"}}}
+	ToStruct(msg, &x)
+	toStructSlow(msg, &y)
+	if !reflect.DeepEqual(x, y) {
+		t.Errorf("Got %+v\nExpected: %+v", x, y)
+	}
+}
