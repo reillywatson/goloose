@@ -9,13 +9,29 @@ import (
 	"time"
 )
 
+type Options struct {
+	StringToFloat64 bool // controls whether goloose will convert strings to floats if required; note this breaks the json.Unmarshal paradigm
+}
+
+func DefaultOptions() Options {
+	return Options{StringToFloat64: false}
+}
+
 func ToStruct(in, out interface{}) error {
-	return ToStructWithTransforms(in, out, nil)
+	return ToStructWithTransformsAndOptions(in, out, nil, DefaultOptions())
+}
+
+func ToStructWithOptions(in, out interface{}, options Options) error {
+	return ToStructWithTransformsAndOptions(in, out, nil, options)
 }
 
 type TransformFunc func(interface{}) interface{}
 
 func ToStructWithTransforms(in, out interface{}, transforms []TransformFunc) error {
+	return ToStructWithTransformsAndOptions(in, out, transforms, DefaultOptions())
+}
+
+func ToStructWithTransformsAndOptions(in, out interface{}, transforms []TransformFunc, options Options) error {
 	if isNil(reflect.ValueOf(in)) {
 		return nil
 	}
@@ -25,11 +41,11 @@ func ToStructWithTransforms(in, out interface{}, transforms []TransformFunc) err
 		return fmt.Errorf("out should be a pointer!")
 	}
 
-	err := toStructImpl(reflect.ValueOf(in), outVal, transforms)
+	err := toStructImpl(reflect.ValueOf(in), outVal, transforms, options)
 	return err
 }
 
-func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
+func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Options) error {
 	if !in.IsValid() || !in.CanInterface() {
 		return nil
 	}
@@ -51,7 +67,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 		if out.IsNil() {
 			out.Set(reflect.New(out.Type().Elem()))
 		}
-		return toStructImpl(in, out.Elem(), transforms)
+		return toStructImpl(in, out.Elem(), transforms, options)
 	}
 	if isNil(in) {
 		out.Set(reflect.Zero(out.Type()))
@@ -68,7 +84,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 			switch inType.Kind() {
 			case reflect.Struct, reflect.Map:
 				outVal = reflect.MakeMap(mapStringInterfaceType)
-				err := toStructImpl(in, outVal, transforms)
+				err := toStructImpl(in, outVal, transforms, options)
 				if err != nil {
 					return err
 				}
@@ -77,17 +93,17 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 			case reflect.Slice:
 				outVal = reflect.New(interfaceSliceType)
 			case reflect.Interface:
-				return toStructImpl(in.Elem(), out, transforms)
+				return toStructImpl(in.Elem(), out, transforms, options)
 			default:
 				outVal = reflect.New(inType).Elem()
-				err := toStructImpl(in, outVal, transforms)
+				err := toStructImpl(in, outVal, transforms, options)
 				if err != nil {
 					return err
 				}
 				out.Set(outVal)
 				return nil
 			}
-			err := toStructImpl(in, outVal, transforms)
+			err := toStructImpl(in, outVal, transforms, options)
 			if err != nil {
 				return err
 			}
@@ -123,7 +139,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 					out.Set(outMap)
 				}
 				outVal := reflect.New(out.Type().Elem())
-				err := toStructImpl(val, outVal, transforms)
+				err := toStructImpl(val, outVal, transforms, options)
 				if err != nil {
 					return err
 				}
@@ -141,7 +157,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 						if val.Kind() == reflect.Ptr && val.IsNil() {
 							continue
 						}
-						err := toStructImpl(val, fieldByIndex(out, outfield.index, true), transforms)
+						err := toStructImpl(val, fieldByIndex(out, outfield.index, true), transforms, options)
 						if err != nil {
 							return err
 						}
@@ -170,7 +186,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 					outMap := reflect.MakeMap(out.Type())
 					out.Set(outMap)
 				}
-				err := toStructImpl(val, outVal, transforms)
+				err := toStructImpl(val, outVal, transforms, options)
 				if err != nil {
 					return err
 				}
@@ -188,7 +204,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 						if val.Kind() == reflect.Ptr && val.IsNil() {
 							continue
 						}
-						err := toStructImpl(val, fieldByIndex(out, field.index, true), transforms)
+						err := toStructImpl(val, fieldByIndex(out, field.index, true), transforms, options)
 						if err != nil {
 							return err
 						}
@@ -206,7 +222,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 		}
 		for i := 0; i < in.Len(); i++ {
 			val := in.Index(i)
-			err := toStructImpl(val, out.Index(i), transforms)
+			err := toStructImpl(val, out.Index(i), transforms, options)
 			if err != nil {
 				return err
 			}
@@ -214,15 +230,15 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint,
 		reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int64, reflect.Uintptr, reflect.Float32,
 		reflect.Bool, reflect.String, reflect.Float64, reflect.Complex64, reflect.Complex128:
-		tryToConvert(in, out)
+		tryToConvert(in, out, options)
 	case reflect.Array:
 		panic("Array not supported yet!")
 	case reflect.Chan, reflect.Func:
 		// do nothing
 	case reflect.Interface:
-		return toStructImpl(in.Elem(), out, transforms)
+		return toStructImpl(in.Elem(), out, transforms, options)
 	case reflect.Ptr:
-		return toStructImpl(in.Elem(), out, transforms)
+		return toStructImpl(in.Elem(), out, transforms, options)
 	case reflect.UnsafePointer:
 		panic("UnsafePointer not supported!")
 	default:
@@ -231,7 +247,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc) error {
 	return nil
 }
 
-func tryToConvert(in, out reflect.Value) {
+func tryToConvert(in, out reflect.Value, options Options) {
 	switch in.Kind() {
 	case reflect.String:
 		if out.Kind() == reflect.Bool {
@@ -240,6 +256,11 @@ func tryToConvert(in, out reflect.Value) {
 				out.Set(reflect.ValueOf(true))
 			case "false":
 				out.Set(reflect.ValueOf(false))
+			}
+		}
+		if options.StringToFloat64 && out.Kind() == reflect.Float64 {
+			if f, err := strconv.ParseFloat(in.String(), 64); err == nil {
+				out.Set(reflect.ValueOf(f))
 			}
 		}
 	}

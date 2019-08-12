@@ -499,3 +499,67 @@ func TestSetExistingInterfaceInSlice(t *testing.T) {
 		t.Errorf("Got %+v\nExpected: %+v", x, y)
 	}
 }
+
+func TestStringToFloat64(t *testing.T) {
+	// note: all tests also confirm that we don't effect strings containing only numbers
+
+	type Foo struct {
+		FloatVal  float64 `json:"float_val"`
+		StringVal string  `json:"string_val"`
+	}
+	var x, y, z Foo
+
+	// test 1: default options don't convert string
+	msg := map[string]interface{}{
+		"float_val":  "3.14159",
+		"string_val": "42",
+	}
+	expected := Foo{
+		FloatVal:  0,
+		StringVal: "42",
+	}
+
+	err := ToStruct(msg, &x)
+	if err != nil {
+		t.Error(err)
+	}
+	if !reflect.DeepEqual(x, expected) {
+		t.Errorf("\ndefault options shouldn't convert strings to floats\nexpected: %v\nreceived: %v\n", expected, x)
+	}
+
+	// test 2: false doesn't convert string
+	msg = map[string]interface{}{
+		"float_val":  "3.14159",
+		"string_val": "42",
+	}
+	expected = Foo{
+		FloatVal:  0,
+		StringVal: "42",
+	}
+
+	err = ToStructWithOptions(msg, &y, Options{StringToFloat64: false})
+	if err != nil {
+		t.Error(err)
+	}
+	if !reflect.DeepEqual(y, expected) {
+		t.Errorf("\nstringToFloat64 false shouldn't convert strings to floats\nexpected: %v\nreceived: %v\n", expected, x)
+	}
+
+	// test 3: true converts string
+	msg = map[string]interface{}{
+		"float_val":  "3.14159",
+		"string_val": "42",
+	}
+	expected = Foo{
+		FloatVal:  3.14159,
+		StringVal: "42",
+	}
+
+	err = ToStructWithOptions(msg, &z, Options{StringToFloat64: true})
+	if err != nil {
+		t.Error(err)
+	}
+	if !reflect.DeepEqual(z, expected) {
+		t.Errorf("\nstringToFloat64 true should convert strings to floats\nexpected: %v\nreceived: %v\n", expected, x)
+	}
+}
