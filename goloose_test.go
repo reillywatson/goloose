@@ -32,7 +32,7 @@ func TestToStruct(t *testing.T) {
 	}
 	var b foo
 	var c foo
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -42,7 +42,7 @@ func TestToStruct(t *testing.T) {
 func TestToStructConvertsTypes(t *testing.T) {
 	a := []int{1, 2, 3}
 	var b, c []float64
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -58,7 +58,7 @@ func TestToStructIntToInterface(t *testing.T) {
 	}
 	a := foo{6}
 	var b, c bar
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -74,7 +74,7 @@ func TestToStructConvertsTimes(t *testing.T) {
 	}
 	a := foo{time.Now().UTC(), timePtr(time.Now().UTC())}
 	var b, c foo
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -96,7 +96,7 @@ func TestToStructTimeToString(t *testing.T) {
 	}
 	a := foo{time.Now(), timePtr(time.Now()), time.Now().Format(time.RFC3339), time.Now().Format(time.RFC3339)}
 	var b, c bar
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -111,7 +111,7 @@ func TestToStructZerosThingsOut(t *testing.T) {
 	a := map[string]interface{}{"a": 1}
 	b := foo{1, 1}
 	c := foo{1, 1}
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -125,7 +125,7 @@ func TestToStructIgnoresCase(t *testing.T) {
 	a := map[string]interface{}{"aBc_DEf": 2}
 	b := foo{1}
 	c := foo{1}
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -138,13 +138,13 @@ func TestToStructDuration(t *testing.T) {
 	}
 	a := foo{1373663273332128183} // this is large enough that a float64 will lose some precision
 	var b, c foo
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
 	}
 	var d, e map[string]interface{}
-	ToStruct(a, &d, DefaultOptions())
+	ToStruct(a, &d)
 	toStructSlow(a, &e)
 	if !reflect.DeepEqual(d, e) {
 		t.Errorf("Got %v\nExpected %v", d, e)
@@ -160,7 +160,7 @@ func TestToStructEmbeddedStruct(t *testing.T) {
 	}
 	a := foo{Bar: bar{Baz: 1}}
 	var b map[string]interface{}
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	val := reflect.ValueOf(b["bar"])
 	if val.Kind() != reflect.Map {
 		t.Errorf("Expected map, got %v", val.Type())
@@ -179,13 +179,13 @@ func TestToStructInterfaceSlice(t *testing.T) {
 		} `json:"a"`
 	}
 	var b, c foo
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
 	}
 	var d, e map[string]interface{}
-	ToStruct(a, &d, DefaultOptions())
+	ToStruct(a, &d)
 	toStructSlow(a, &e)
 	if !reflect.DeepEqual(d, e) {
 		t.Errorf("Got %v\nExpected %v", d, e)
@@ -199,7 +199,7 @@ func TestToStructUnexportedFields(t *testing.T) {
 	}
 	a := foo{A: 1, b: 2}
 	var b, c foo
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -215,13 +215,13 @@ func TestToStructPointer(t *testing.T) {
 	}
 	a := map[string]interface{}{"a": map[string]interface{}{"b": "b"}}
 	var b, c foo
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
 	}
 	var d, e map[string]interface{}
-	ToStruct(a, &d, DefaultOptions())
+	ToStruct(a, &d)
 	toStructSlow(a, &e)
 	if !reflect.DeepEqual(d, e) {
 		t.Errorf("Got %v\nExpected %v", d, e)
@@ -232,7 +232,7 @@ func TestToStructEmptyMap(t *testing.T) {
 	var emptyMap map[string]interface{}
 	a := map[string]interface{}{"a": map[string]interface{}{}, "b": emptyMap}
 	var b, c map[string]interface{}
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -246,7 +246,7 @@ func TestPointerToInt(t *testing.T) {
 	one := 1
 	a := foo{A: &one}
 	var b, c map[string]interface{}
-	ToStruct(a, &b, DefaultOptions())
+	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %v\nExpected %v", b, c)
@@ -264,7 +264,7 @@ func TestEmbeddedStructPtr(t *testing.T) {
 	m := map[string]interface{}{
 		"Baz": "cancel",
 	}
-	ToStruct(m, &a, DefaultOptions())
+	ToStruct(m, &a)
 	toStructSlow(m, &b)
 	if !reflect.DeepEqual(a, b) {
 		t.Errorf("Got %v\nExpected: %v", a, b)
@@ -286,7 +286,7 @@ func TestEmbeddedStructPtrDoesntAllocAbsentFields(t *testing.T) {
 	m := map[string]interface{}{
 		"Baz": "cancel",
 	}
-	ToStruct(m, &a, DefaultOptions())
+	ToStruct(m, &a)
 	toStructSlow(m, &b)
 	if !reflect.DeepEqual(a, b) {
 		t.Errorf("Got %v\nExpected: %v", a, b)
@@ -302,7 +302,7 @@ func TestEmbeddedNilPointer(t *testing.T) {
 	}
 	var m Foo
 	var a, b Foo
-	errA := ToStruct(m, &a, DefaultOptions())
+	errA := ToStruct(m, &a)
 	errB := toStructSlow(m, &b)
 	if errA != errB {
 		t.Errorf("Got err %v, expected %v", errA, errB)
@@ -320,7 +320,7 @@ func TestInvalidTime(t *testing.T) {
 	m := map[string]interface{}{
 		"time": "badtime",
 	}
-	aErr := ToStruct(m, &a, DefaultOptions())
+	aErr := ToStruct(m, &a)
 	bErr := toStructSlow(m, &b)
 	if !reflect.DeepEqual(a, b) {
 		t.Errorf("Got %v\nExpected: %v", a, b)
@@ -338,7 +338,7 @@ func TestStringJSONString(t *testing.T) {
 	m := map[string]interface{}{
 		"bar": "\"a\"",
 	}
-	ToStruct(m, &a, DefaultOptions())
+	ToStruct(m, &a)
 	toStructSlow(m, &b)
 	if !reflect.DeepEqual(a, b) {
 		t.Errorf("Got %v\nExpected: %v", a, b)
@@ -353,7 +353,7 @@ func TestStringJSONInt64(t *testing.T) {
 	m := map[string]interface{}{
 		"id": "131412412412412412",
 	}
-	ToStruct(m, &a, DefaultOptions())
+	ToStruct(m, &a)
 	toStructSlow(m, &b)
 	if !reflect.DeepEqual(a, b) {
 		t.Errorf("Got %v\nExpected: %v", a, b)
@@ -370,7 +370,7 @@ func TestEmbeddedFunc(t *testing.T) {
 	a.Fn = fn
 	b.Fn = fn
 	m := map[string]interface{}{"bar": "a", "Fn": "2"}
-	ToStruct(m, &a, DefaultOptions())
+	ToStruct(m, &a)
 	toStructSlow(m, &b)
 	// verify neither func is nil
 	if a.Fn() != 1 {
@@ -393,7 +393,7 @@ func TestNilNondestructive(t *testing.T) {
 	b.Bar = "test"
 
 	var m map[string]interface{}
-	ToStruct(m, &a, DefaultOptions())
+	ToStruct(m, &a)
 	toStructSlow(m, &b)
 	if !reflect.DeepEqual(a, b) {
 		t.Errorf("Got %v\nExpected: %v", a, b)
@@ -410,7 +410,7 @@ func TestInterfaceArray(t *testing.T) {
 	a := Foo{Bar: []interface{}{X{X: 1}, 5}}
 	m1 := map[string]interface{}{}
 	m2 := map[string]interface{}{}
-	ToStruct(a, &m1, DefaultOptions())
+	ToStruct(a, &m1)
 	toStructSlow(a, &m2)
 	if !reflect.DeepEqual(m1, m2) {
 		t.Errorf("Got %v\nExpected: %v", m1, m2)
@@ -426,7 +426,7 @@ func TestConvertTrueAndFalseStringsToBool(t *testing.T) {
 	}
 	var a foo
 	expected := foo{Bar: "true", Baz: true, Qux: boolPtr(true)}
-	ToStruct(map[string]interface{}{"bar": "true", "baz": "true", "qux": "true"}, &a, DefaultOptions())
+	ToStruct(map[string]interface{}{"bar": "true", "baz": "true", "qux": "true"}, &a)
 	if !reflect.DeepEqual(a, expected) {
 		t.Errorf("Got %+v\nExpected: %+v", a, expected)
 	}
@@ -438,7 +438,7 @@ func TestErrorInMap(t *testing.T) {
 	a := map[string]interface{}{"foo": fmt.Errorf("bar")}
 	expected := map[string]interface{}{"foo": "bar"}
 	var b map[string]interface{}
-	ToStructWithTransforms(a, &b, []TransformFunc{convertErrors}, DefaultOptions())
+	ToStructWithTransforms(a, &b, []TransformFunc{convertErrors})
 	if !reflect.DeepEqual(expected, b) {
 		t.Errorf("Got %+v\nExpected: %+v", b, expected)
 	}
@@ -459,7 +459,7 @@ func TestOverwriteBoolPtrWithNil(t *testing.T) {
 	x := Foo{boolPtr(false)}
 	y := Foo{boolPtr(false)}
 	msg := map[string]interface{}{"b": nil}
-	ToStruct(msg, &x, DefaultOptions())
+	ToStruct(msg, &x)
 	toStructSlow(msg, &y)
 	if !reflect.DeepEqual(x, y) {
 		t.Errorf("Got %+v\nExpected: %+v", x, y)
@@ -472,7 +472,7 @@ func TestWriteNilWithTransforms(t *testing.T) {
 	}
 	msg := map[string]interface{}{"b": nil}
 	var x, y Foo
-	ToStructWithTransforms(msg, &x, []TransformFunc{nilTransform}, DefaultOptions())
+	ToStructWithTransforms(msg, &x, []TransformFunc{nilTransform})
 	toStructSlow(msg, &y)
 	if !reflect.DeepEqual(x, y) {
 		t.Errorf("Got %+v\nExpected: %+v", x, y)
@@ -493,7 +493,7 @@ func TestSetExistingInterfaceInSlice(t *testing.T) {
 	msg := map[string]interface{}{"foo": []map[string]interface{}{{"val": "floob"}}}
 	x := Bar{Foo: []Foo{{Val: "qux"}}}
 	y := Bar{Foo: []Foo{{Val: "qux"}}}
-	ToStruct(msg, &x, DefaultOptions())
+	ToStruct(msg, &x)
 	toStructSlow(msg, &y)
 	if !reflect.DeepEqual(x, y) {
 		t.Errorf("Got %+v\nExpected: %+v", x, y)
@@ -519,7 +519,7 @@ func TestStringToFloat64(t *testing.T) {
 		StringVal: "42",
 	}
 
-	err := ToStruct(msg, &x, DefaultOptions())
+	err := ToStruct(msg, &x)
 	if err != nil {
 		t.Error(err)
 	}
@@ -537,7 +537,7 @@ func TestStringToFloat64(t *testing.T) {
 		StringVal: "42",
 	}
 
-	err = ToStruct(msg, &y, Options{StringToFloat64: false})
+	err = ToStructWithOptions(msg, &y, Options{StringToFloat64: false})
 	if err != nil {
 		t.Error(err)
 	}
@@ -555,7 +555,7 @@ func TestStringToFloat64(t *testing.T) {
 		StringVal: "42",
 	}
 
-	err = ToStruct(msg, &z, Options{StringToFloat64: true})
+	err = ToStructWithOptions(msg, &z, Options{StringToFloat64: true})
 	if err != nil {
 		t.Error(err)
 	}

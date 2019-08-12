@@ -17,13 +17,21 @@ func DefaultOptions() Options {
 	return Options{StringToFloat64: false}
 }
 
-func ToStruct(in, out interface{}, options Options) error {
-	return ToStructWithTransforms(in, out, nil, options)
+func ToStruct(in, out interface{}) error {
+	return ToStructWithTransformsAndOptions(in, out, nil, DefaultOptions())
+}
+
+func ToStructWithOptions(in, out interface{}, options Options) error {
+	return ToStructWithTransformsAndOptions(in, out, nil, options)
 }
 
 type TransformFunc func(interface{}) interface{}
 
-func ToStructWithTransforms(in, out interface{}, transforms []TransformFunc, options Options) error {
+func ToStructWithTransforms(in, out interface{}, transforms []TransformFunc) error {
+	return ToStructWithTransformsAndOptions(in, out, transforms, DefaultOptions())
+}
+
+func ToStructWithTransformsAndOptions(in, out interface{}, transforms []TransformFunc, options Options) error {
 	if isNil(reflect.ValueOf(in)) {
 		return nil
 	}
