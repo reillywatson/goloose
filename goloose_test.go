@@ -434,6 +434,20 @@ func TestConvertTrueAndFalseStringsToBool(t *testing.T) {
 
 func boolPtr(b bool) *bool { return &b }
 
+func TestBoolCapitalization(t *testing.T) {
+	type foo struct {
+		Bar bool `json:"bar"`
+		Baz bool `json:"baz"`
+		Qux bool `json:"qux"`
+	}
+	var a foo
+	expected := foo{Bar: true, Baz: true, Qux: true}
+	ToStruct(map[string]interface{}{"bar": "true", "baz": "TRUE", "qux": "tRuE"}, &a)
+	if !reflect.DeepEqual(a, expected) {
+		t.Errorf("Got %+v\nExpected: %+v", a, expected)
+	}
+}
+
 func TestErrorInMap(t *testing.T) {
 	a := map[string]interface{}{"foo": fmt.Errorf("bar")}
 	expected := map[string]interface{}{"foo": "bar"}

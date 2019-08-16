@@ -251,7 +251,7 @@ func tryToConvert(in, out reflect.Value, options Options) {
 	switch in.Kind() {
 	case reflect.String:
 		if out.Kind() == reflect.Bool {
-			switch in.String() {
+			switch strings.ToLower(in.String()) {
 			case "true":
 				out.Set(reflect.ValueOf(true))
 			case "false":
