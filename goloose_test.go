@@ -577,3 +577,20 @@ func TestStringToFloat64(t *testing.T) {
 		t.Errorf("\nstringToFloat64 true should convert strings to floats\nexpected: %v\nreceived: %v\n", expected, x)
 	}
 }
+
+func TestStringToFloat64ConvertsAliases(t *testing.T) {
+	type MyFloat float64
+	type Foo struct {
+		A MyFloat `json:"a"`
+	}
+	expected := Foo{A: 3.14159}
+	foo := Foo{}
+	msg := map[string]interface{}{"a": "3.14159"}
+	err := ToStructWithOptions(msg, &foo, Options{StringToFloat64: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(foo, expected) {
+		t.Errorf("\nstringToFloat64 true should convert strings to floats\nexpected: %v\nreceived: %v\n", expected, foo)
+	}
+}

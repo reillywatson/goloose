@@ -260,7 +260,7 @@ func tryToConvert(in, out reflect.Value, options Options) {
 		}
 		if options.StringToFloat64 && out.Kind() == reflect.Float64 {
 			if f, err := strconv.ParseFloat(in.String(), 64); err == nil {
-				out.Set(reflect.ValueOf(f))
+				out.Set(reflect.ValueOf(f).Convert(out.Type()))
 			}
 		}
 	}
