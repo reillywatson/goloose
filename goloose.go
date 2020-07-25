@@ -77,8 +77,16 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 		inType := in.Type()
 		if out.IsNil() {
 			var outVal reflect.Value
+
 			for inType.Kind() == reflect.Ptr {
-				inType = inType.Elem()
+				if isNil(in) {
+					return nil
+				}
+				in = in.Elem()
+				inType = in.Type()
+			}
+			if isNil(in) {
+				return nil
 			}
 			inType = toJsonType(inType)
 			switch inType.Kind() {

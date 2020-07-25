@@ -594,3 +594,58 @@ func TestStringToFloat64ConvertsAliases(t *testing.T) {
 		t.Errorf("\nstringToFloat64 true should convert strings to floats\nexpected: %v\nreceived: %v\n", expected, foo)
 	}
 }
+
+func TestConvertPtrToNilStruct(t *testing.T) {
+	type MyStruct struct {
+		A int `json:"a"`
+	}
+	var nilStruct *MyStruct
+	a := struct {
+		Struct **MyStruct `json:"struct"`
+	}{Struct: &nilStruct}
+	var b, c map[string]interface{}
+	ToStruct(a, &b)
+	toStructSlow(a, &c)
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %v\nExpected %v", b, c)
+	}
+}
+
+func TestConvertPtrToNilPtr(t *testing.T) {
+	var nilInt *int
+	a := struct {
+		MyInt **int `json:"my_int"`
+	}{MyInt: &nilInt}
+	var b, c map[string]interface{}
+	ToStruct(a, &b)
+	toStructSlow(a, &c)
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %v\nExpected %v", b, c)
+	}
+}
+
+func TestConvertPtrToNilSlice(t *testing.T) {
+	var nilInt []int
+	a := struct {
+		MyInt *[]int `json:"my_int"`
+	}{MyInt: &nilInt}
+	var b, c map[string]interface{}
+	ToStruct(a, &b)
+	toStructSlow(a, &c)
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %v\nExpected %v", b, c)
+	}
+}
+
+func TestConvertPtrToNilMap(t *testing.T) {
+	var nilMap map[string]interface{}
+	a := struct {
+		MyMap *map[string]interface{} `json:"my_map"`
+	}{MyMap: &nilMap}
+	var b, c map[string]interface{}
+	ToStruct(a, &b)
+	toStructSlow(a, &c)
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %v\nExpected %v", b, c)
+	}
+}
