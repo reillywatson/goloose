@@ -1,6 +1,7 @@
 package goloose
 
 import (
+	"cloud.google.com/go/civil"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -643,6 +644,23 @@ func TestConvertPtrToNilMap(t *testing.T) {
 		MyMap *map[string]interface{} `json:"my_map"`
 	}{MyMap: &nilMap}
 	var b, c map[string]interface{}
+	ToStruct(a, &b)
+	toStructSlow(a, &c)
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %v\nExpected %v", b, c)
+	}
+}
+
+func TestStringToCivilDate(t *testing.T) {
+	type Foo struct {
+		Date    civil.Date  `json:"date"`
+		DatePtr *civil.Date `json:"date_ptr"`
+	}
+	a := map[string]interface{}{
+		"date":     "2021-04-10",
+		"date_ptr": "2021-04-10",
+	}
+	var b, c Foo
 	ToStruct(a, &b)
 	toStructSlow(a, &c)
 	if !reflect.DeepEqual(b, c) {

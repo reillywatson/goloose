@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"cloud.google.com/go/civil"
 )
 
 type Options struct {
@@ -336,6 +338,7 @@ var mapStringInterfaceType = reflect.TypeOf(map[string]interface{}{})
 var interfaceSliceType = reflect.TypeOf([]interface{}{})
 var timeType = reflect.TypeOf(time.Time{})
 var timePtrType = reflect.TypeOf(&time.Time{})
+var civilDateType = reflect.TypeOf(civil.Date{})
 var jsonMarshalerType = reflect.TypeOf(new(json.Marshaler)).Elem()
 var jsonUnmarshalerType = reflect.TypeOf(new(json.Unmarshaler)).Elem()
 
@@ -345,7 +348,10 @@ func customJson(in, out reflect.Value) (bool, error) {
 	}
 	inOk := in.Type().Implements(jsonMarshalerType)
 	outOk := out.Addr().Type().Implements(jsonUnmarshalerType)
-	if inOk || outOk {
+	// civil.Date implements encoding.TextUnmarshaler instead
+	isCivilDate := out.Type() == civilDateType
+
+	if inOk || outOk || isCivilDate {
 		if timeFastPath(in, out) {
 			return true, nil
 		}
@@ -390,6 +396,12 @@ func timeFastPath(in, out reflect.Value) bool {
 			t, err := time.Parse(time.RFC3339Nano, in.String())
 			if err == nil {
 				out.Set(reflect.ValueOf(t))
+				return true
+			}
+		case civilDateType:
+			c, err := civil.ParseDate(in.String())
+			if err == nil {
+				out.Set(reflect.ValueOf(c))
 				return true
 			}
 		}
