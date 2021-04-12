@@ -1,6 +1,7 @@
 package goloose
 
 import (
+	"encoding"
 	"encoding/json"
 	"fmt"
 	"reflect"
@@ -338,13 +339,15 @@ var timeType = reflect.TypeOf(time.Time{})
 var timePtrType = reflect.TypeOf(&time.Time{})
 var jsonMarshalerType = reflect.TypeOf(new(json.Marshaler)).Elem()
 var jsonUnmarshalerType = reflect.TypeOf(new(json.Unmarshaler)).Elem()
+var textMarshalerType = reflect.TypeOf(new(encoding.TextMarshaler)).Elem()
+var textUnmarshalerType = reflect.TypeOf(new(encoding.TextUnmarshaler)).Elem()
 
 func customJson(in, out reflect.Value) (bool, error) {
 	if !out.CanAddr() {
 		return false, nil
 	}
-	inOk := in.Type().Implements(jsonMarshalerType)
-	outOk := out.Addr().Type().Implements(jsonUnmarshalerType)
+	inOk := in.Type().Implements(jsonMarshalerType) || in.Type().Implements(textMarshalerType)
+	outOk := out.Addr().Type().Implements(jsonUnmarshalerType) || out.Addr().Type().Implements(textUnmarshalerType)
 	if inOk || outOk {
 		if timeFastPath(in, out) {
 			return true, nil

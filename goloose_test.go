@@ -649,3 +649,39 @@ func TestConvertPtrToNilMap(t *testing.T) {
 		t.Errorf("Got %v\nExpected %v", b, c)
 	}
 }
+
+type Date struct {
+	Year  int
+	Month time.Month
+	Day   int
+}
+
+func (d Date) MarshalText() ([]byte, error) {
+	return []byte(fmt.Sprintf("%04d-%02d-%02d", d.Year, d.Month, d.Day)), nil
+}
+func (d *Date) UnmarshalText(data []byte) error {
+	t, err := time.Parse("2006-01-02", string(data))
+	if err != nil {
+		return err
+	}
+	d.Year, d.Month, d.Day = t.Date()
+	return nil
+}
+
+func TestCustomTextMarshaler(t *testing.T) {
+	type Foo struct {
+		Date Date `json:"date"`
+	}
+	var a, b Foo
+	m := map[string]interface{}{
+		"date": "2001-01-01",
+	}
+	aErr := ToStruct(m, &a)
+	bErr := toStructSlow(m, &b)
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %v\nExpected: %v", a, b)
+	}
+	if !reflect.DeepEqual(aErr, bErr) {
+		t.Errorf("Got %v\nExpected: %v", aErr, bErr)
+	}
+}
