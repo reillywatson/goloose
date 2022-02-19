@@ -346,8 +346,10 @@ func customJson(in, out reflect.Value) (bool, error) {
 	if !out.CanAddr() {
 		return false, nil
 	}
-	inOk := in.Type().Implements(jsonMarshalerType) || in.Type().Implements(textMarshalerType)
-	outOk := out.Addr().Type().Implements(jsonUnmarshalerType) || out.Addr().Type().Implements(textUnmarshalerType)
+	inType := in.Type()
+	outType := out.Addr().Type()
+	inOk := inType.Implements(jsonMarshalerType) || inType.Implements(textMarshalerType)
+	outOk := outType.Implements(jsonUnmarshalerType) || outType.Implements(textUnmarshalerType)
 	if inOk || outOk {
 		if timeFastPath(in, out) {
 			return true, nil
