@@ -49,6 +49,18 @@ func TestToStructConvertsTypes(t *testing.T) {
 	}
 }
 
+func TestConvertTo(t *testing.T) {
+	a := []int{1, 2, 3}
+	got, err := ConvertTo[[]float64](a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exp := []float64{1, 2, 3}
+	if !reflect.DeepEqual(got, exp) {
+		t.Errorf("Got %v\nExpected %v", got, exp)
+	}
+}
+
 func TestToStructIntToInterface(t *testing.T) {
 	type foo struct {
 		Dur int `json:"dur"`
@@ -452,7 +464,7 @@ func TestErrorInMap(t *testing.T) {
 	a := map[string]interface{}{"foo": fmt.Errorf("bar")}
 	expected := map[string]interface{}{"foo": "bar"}
 	var b map[string]interface{}
-	ToStructWithTransforms(a, &b, []TransformFunc{convertErrors})
+	ToStruct(a, &b, Options{Transforms: []TransformFunc{convertErrors}})
 	if !reflect.DeepEqual(expected, b) {
 		t.Errorf("Got %+v\nExpected: %+v", b, expected)
 	}
@@ -486,7 +498,7 @@ func TestWriteNilWithTransforms(t *testing.T) {
 	}
 	msg := map[string]interface{}{"b": nil}
 	var x, y Foo
-	ToStructWithTransforms(msg, &x, []TransformFunc{nilTransform})
+	ToStruct(msg, &x, Options{Transforms: []TransformFunc{nilTransform}})
 	toStructSlow(msg, &y)
 	if !reflect.DeepEqual(x, y) {
 		t.Errorf("Got %+v\nExpected: %+v", x, y)
@@ -551,7 +563,7 @@ func TestStringToFloat64(t *testing.T) {
 		StringVal: "42",
 	}
 
-	err = ToStructWithOptions(msg, &y, Options{StringToFloat64: false})
+	err = ToStruct(msg, &y, Options{StringToFloat64: false})
 	if err != nil {
 		t.Error(err)
 	}
@@ -569,7 +581,7 @@ func TestStringToFloat64(t *testing.T) {
 		StringVal: "42",
 	}
 
-	err = ToStructWithOptions(msg, &z, Options{StringToFloat64: true})
+	err = ToStruct(msg, &z, Options{StringToFloat64: true})
 	if err != nil {
 		t.Error(err)
 	}
@@ -586,7 +598,7 @@ func TestStringToFloat64ConvertsAliases(t *testing.T) {
 	expected := Foo{A: 3.14159}
 	foo := Foo{}
 	msg := map[string]interface{}{"a": "3.14159"}
-	err := ToStructWithOptions(msg, &foo, Options{StringToFloat64: true})
+	err := ToStruct(msg, &foo, Options{StringToFloat64: true})
 	if err != nil {
 		t.Fatal(err)
 	}

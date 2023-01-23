@@ -12,45 +12,43 @@ import (
 
 type Options struct {
 	StringToFloat64 bool // controls whether goloose will convert strings to floats if required; note this breaks the json.Unmarshal paradigm
-}
 
-func DefaultOptions() Options {
-	return Options{StringToFloat64: false}
+	Transforms []TransformFunc
 }
-
-func ToStruct(in, out interface{}) error {
-	return ToStructWithTransformsAndOptions(in, out, nil, DefaultOptions())
-}
-
-func ToStructWithOptions(in, out interface{}, options Options) error {
-	return ToStructWithTransformsAndOptions(in, out, nil, options)
-}
-
 type TransformFunc func(interface{}) interface{}
 
-func ToStructWithTransforms(in, out interface{}, transforms []TransformFunc) error {
-	return ToStructWithTransformsAndOptions(in, out, transforms, DefaultOptions())
+// ConvertTo tries to convert in into a T, using JSON marshal/unmarshal semantics.
+func ConvertTo[T any](in any, options ...Options) (T, error) {
+	var res T
+	err := ToStruct(in, &res, options...)
+	return res, err
 }
 
-func ToStructWithTransformsAndOptions(in, out interface{}, transforms []TransformFunc, options Options) error {
+func ToStruct(in, out interface{}, options ...Options) error {
 	if isNil(reflect.ValueOf(in)) {
 		return nil
 	}
-
 	outVal := reflect.ValueOf(out)
 	if outVal.Kind() != reflect.Ptr {
 		return fmt.Errorf("out should be a pointer!")
 	}
 
-	err := toStructImpl(reflect.ValueOf(in), outVal, transforms, options)
+	var opt Options
+	if len(options) > 1 {
+		return fmt.Errorf("pass at most one Options struct")
+	} else if len(options) == 1 {
+		opt = options[0]
+	}
+
+	err := toStructImpl(reflect.ValueOf(in), outVal, opt)
 	return err
 }
 
-func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Options) error {
+func toStructImpl(in, out reflect.Value, options Options) error {
 	if !in.IsValid() || !in.CanInterface() {
 		return nil
 	}
-	for _, fn := range transforms {
+	for _, fn := range options.Transforms {
 		in = reflect.ValueOf(fn(in.Interface()))
 		if !in.IsValid() {
 			return nil
@@ -68,7 +66,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 		if out.IsNil() {
 			out.Set(reflect.New(out.Type().Elem()))
 		}
-		return toStructImpl(in, out.Elem(), transforms, options)
+		return toStructImpl(in, out.Elem(), options)
 	}
 	if isNil(in) {
 		out.Set(reflect.Zero(out.Type()))
@@ -93,7 +91,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 			switch inType.Kind() {
 			case reflect.Struct, reflect.Map:
 				outVal = reflect.MakeMap(mapStringInterfaceType)
-				err := toStructImpl(in, outVal, transforms, options)
+				err := toStructImpl(in, outVal, options)
 				if err != nil {
 					return err
 				}
@@ -102,17 +100,17 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 			case reflect.Slice:
 				outVal = reflect.New(interfaceSliceType)
 			case reflect.Interface:
-				return toStructImpl(in.Elem(), out, transforms, options)
+				return toStructImpl(in.Elem(), out, options)
 			default:
 				outVal = reflect.New(inType).Elem()
-				err := toStructImpl(in, outVal, transforms, options)
+				err := toStructImpl(in, outVal, options)
 				if err != nil {
 					return err
 				}
 				out.Set(outVal)
 				return nil
 			}
-			err := toStructImpl(in, outVal, transforms, options)
+			err := toStructImpl(in, outVal, options)
 			if err != nil {
 				return err
 			}
@@ -148,7 +146,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 					out.Set(outMap)
 				}
 				outVal := reflect.New(out.Type().Elem())
-				err := toStructImpl(val, outVal, transforms, options)
+				err := toStructImpl(val, outVal, options)
 				if err != nil {
 					return err
 				}
@@ -166,7 +164,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 						if val.Kind() == reflect.Ptr && val.IsNil() {
 							continue
 						}
-						err := toStructImpl(val, fieldByIndex(out, outfield.index, true), transforms, options)
+						err := toStructImpl(val, fieldByIndex(out, outfield.index, true), options)
 						if err != nil {
 							return err
 						}
@@ -195,7 +193,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 					outMap := reflect.MakeMap(out.Type())
 					out.Set(outMap)
 				}
-				err := toStructImpl(val, outVal, transforms, options)
+				err := toStructImpl(val, outVal, options)
 				if err != nil {
 					return err
 				}
@@ -213,7 +211,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 						if val.Kind() == reflect.Ptr && val.IsNil() {
 							continue
 						}
-						err := toStructImpl(val, fieldByIndex(out, field.index, true), transforms, options)
+						err := toStructImpl(val, fieldByIndex(out, field.index, true), options)
 						if err != nil {
 							return err
 						}
@@ -231,7 +229,7 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 		}
 		for i := 0; i < in.Len(); i++ {
 			val := in.Index(i)
-			err := toStructImpl(val, out.Index(i), transforms, options)
+			err := toStructImpl(val, out.Index(i), options)
 			if err != nil {
 				return err
 			}
@@ -245,9 +243,9 @@ func toStructImpl(in, out reflect.Value, transforms []TransformFunc, options Opt
 	case reflect.Chan, reflect.Func:
 		// do nothing
 	case reflect.Interface:
-		return toStructImpl(in.Elem(), out, transforms, options)
+		return toStructImpl(in.Elem(), out, options)
 	case reflect.Ptr:
-		return toStructImpl(in.Elem(), out, transforms, options)
+		return toStructImpl(in.Elem(), out, options)
 	case reflect.UnsafePointer:
 		panic("UnsafePointer not supported!")
 	default:
