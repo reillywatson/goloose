@@ -1,0 +1,2 @@
+go test fuzz v1
+string("[[{\"name\":\"A\",\"type\":\"int\"},{\"name\":\"A\",\"tYpe\":\"string\"}],[{\"0000\":\"\"}]]")
