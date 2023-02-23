@@ -18,7 +18,7 @@ It makes use of some code from the encoder in the stdlib's encoding/json, to try
 
 ### Options
 
-goloose takes in an object (`Options{}`) that allows the caller to configure it in various ways. The options and effects are detailed below.  It also exposes function `DefaultOptions()` that returns an options struct configured with sane defaults. 
+goloose takes an optional type (`Options{}`) that allows the caller to configure it in various ways. The options and effects are detailed below.
 
 - `StringToFloat64`  
    When this is true, goloose will convert strings to float64 when the in type is string and the out type is float64, and the conversion is possible. ***NOTE:** this is not the behavior of JSON.Unmarshal!*  
