@@ -478,6 +478,42 @@ func convertErrors(in interface{}) interface{} {
 	return in
 }
 
+func BenchmarkToStructSlow(b *testing.B) {
+	type Foo struct {
+		A string `json:"a"`
+		B string `json:"b"`
+		C string `json:"c"`
+	}
+	type Foo2 struct {
+		A string `json:"a"`
+		B string `json:"b"`
+	}
+	f := Foo{A: "some a", B: "some b", C: "some C"}
+	for i := 0; i < b.N; i++ {
+		var foo2 Foo2
+		_ = toStructSlow(f, &foo2)
+		_ = foo2
+	}
+}
+
+func BenchmarkToStruct(b *testing.B) {
+	type Foo struct {
+		A string `json:"a"`
+		B string `json:"b"`
+		C string `json:"c"`
+	}
+	type Foo2 struct {
+		A string `json:"a"`
+		B string `json:"b"`
+	}
+	f := Foo{A: "some a", B: "some b", C: "some C"}
+	for i := 0; i < b.N; i++ {
+		var foo2 Foo2
+		_ = ToStruct(f, &foo2)
+		_ = foo2
+	}
+}
+
 func TestOverwriteBoolPtrWithNil(t *testing.T) {
 	type Foo struct {
 		B *bool `json:"b"`
