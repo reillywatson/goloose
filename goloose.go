@@ -1,6 +1,7 @@
 package goloose
 
 import (
+	"bytes"
 	"encoding"
 	"encoding/json"
 	"fmt"
@@ -25,7 +26,8 @@ func ConvertTo[T any](in any, options ...Options) (T, error) {
 }
 
 func ToStruct(in, out interface{}, options ...Options) error {
-	if isNil(reflect.ValueOf(in)) {
+	inVal := reflect.ValueOf(in)
+	if isNil(inVal) {
 		return nil
 	}
 	outVal := reflect.ValueOf(out)
@@ -40,7 +42,7 @@ func ToStruct(in, out interface{}, options ...Options) error {
 		opt = options[0]
 	}
 
-	err := toStructImpl(reflect.ValueOf(in), outVal, opt)
+	err := toStructImpl(inVal, outVal, opt)
 	return err
 }
 
@@ -54,26 +56,27 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 			return nil
 		}
 	}
-	if handled, err := customJson(in, out); handled {
+	inType := in.Type()
+	outType := out.Type()
+	if handled, err := customJson(in, inType, out, outType); handled {
 		return err
 	}
 
 	if out.Kind() == reflect.Ptr {
 		if (in.Kind() == reflect.Ptr || in.Kind() == reflect.Interface) && in.IsNil() && out.CanAddr() {
-			out.Set(reflect.Zero(out.Type()))
+			out.Set(reflect.Zero(outType))
 			return nil
 		}
 		if out.IsNil() {
-			out.Set(reflect.New(out.Type().Elem()))
+			out.Set(reflect.New(outType.Elem()))
 		}
 		return toStructImpl(in, out.Elem(), options)
 	}
 	if isNil(in) {
-		out.Set(reflect.Zero(out.Type()))
+		out.Set(reflect.Zero(outType))
 		return nil
 	}
 	if out.Kind() == reflect.Interface {
-		inType := in.Type()
 		if out.IsNil() {
 			var outVal reflect.Value
 
@@ -127,7 +130,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 		if out.Kind() != reflect.Map && out.Kind() != reflect.Struct {
 			return nil
 		}
-		fields := cachedTypeFields(in.Type())
+		fields := cachedTypeFields(inType)
 		for _, field := range fields {
 			val := fieldByIndex(in, field.index, false)
 			if field.omitEmpty && isEmptyValue(val) {
@@ -142,22 +145,22 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 			switch out.Kind() {
 			case reflect.Map:
 				if out.IsNil() {
-					outMap := reflect.MakeMap(out.Type())
+					outMap := reflect.MakeMap(outType)
 					out.Set(outMap)
 				}
-				outVal := reflect.New(out.Type().Elem())
+				outVal := reflect.New(outType.Elem())
 				err := toStructImpl(val, outVal, options)
 				if err != nil {
 					return err
 				}
-				nameVal := reflect.ValueOf(field.name).Convert(out.Type().Key())
+				nameVal := reflect.ValueOf(string(field.name)).Convert(outType.Key())
 				out.SetMapIndex(nameVal, outVal.Elem())
 			case reflect.Struct:
 				if len(outFields) == 0 {
-					outFields = cachedTypeFields(out.Type())
+					outFields = cachedTypeFields(outType)
 				}
 				for _, outfield := range outFields {
-					if outfield.namelower == field.namelower {
+					if bytes.Equal(outfield.namelower, field.namelower) {
 						if field.quoted {
 							val = dequote(val)
 						}
@@ -181,30 +184,36 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 			if key.Kind() != reflect.String {
 				return fmt.Errorf("Only string keys are supported! Kind: %v", key.Kind())
 			}
-			keyStr := key.String()
+			keyStr := []byte(key.String())
 			val := in.MapIndex(key)
 			if val.Kind() == reflect.Interface && !val.IsNil() {
 				val = val.Elem()
 			}
 			switch out.Kind() {
 			case reflect.Map:
-				outVal := reflect.New(toJsonType(out.Type().Elem()))
+				outVal := reflect.New(toJsonType(outType.Elem()))
 				if out.IsNil() {
-					outMap := reflect.MakeMap(out.Type())
+					outMap := reflect.MakeMap(outType)
 					out.Set(outMap)
 				}
 				err := toStructImpl(val, outVal, options)
 				if err != nil {
 					return err
 				}
-				out.SetMapIndex(key.Convert(out.Type().Key()), outVal.Elem().Convert(out.Type().Elem()))
+				out.SetMapIndex(key.Convert(outType.Key()), outVal.Elem().Convert(outType.Elem()))
 			case reflect.Struct:
-				keyStr = strings.ToLower(keyStr)
+				// in-place bytes.ToLower
+				for i := 0; i < len(keyStr); i++ {
+					c := keyStr[i]
+					if 'A' <= c && c <= 'Z' {
+						keyStr[i] += 'a' - 'A'
+					}
+				}
 				if len(outFields) == 0 {
-					outFields = cachedTypeFields(out.Type())
+					outFields = cachedTypeFields(outType)
 				}
 				for _, field := range outFields {
-					if field.namelower == keyStr {
+					if bytes.Equal(field.namelower, keyStr) {
 						if field.quoted {
 							val = dequote(val)
 						}
@@ -224,7 +233,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 			return nil
 		}
 		if out.IsNil() || out.Len() != in.Len() {
-			outSlice := reflect.MakeSlice(out.Type(), in.Len(), in.Cap())
+			outSlice := reflect.MakeSlice(outType, in.Len(), in.Cap())
 			out.Set(outSlice)
 		}
 		for i := 0; i < in.Len(); i++ {
@@ -237,7 +246,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Uint,
 		reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Int64, reflect.Uintptr, reflect.Float32,
 		reflect.Bool, reflect.String, reflect.Float64, reflect.Complex64, reflect.Complex128:
-		tryToConvert(in, out, options)
+		tryToConvert(in, inType, out, outType, options)
 	case reflect.Array:
 		panic("Array not supported yet!")
 	case reflect.Chan, reflect.Func:
@@ -254,25 +263,32 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 	return nil
 }
 
-func tryToConvert(in, out reflect.Value, options Options) {
+var trueVal = reflect.ValueOf(true)
+var falseVal = reflect.ValueOf(false)
+
+func tryToConvert(in reflect.Value, inType reflect.Type, out reflect.Value, outType reflect.Type, options Options) {
+	if inType == outType {
+		out.Set(in)
+		return
+	}
 	switch in.Kind() {
 	case reflect.String:
 		if out.Kind() == reflect.Bool {
 			switch strings.ToLower(in.String()) {
 			case "true":
-				out.Set(reflect.ValueOf(true))
+				out.Set(trueVal)
 			case "false":
-				out.Set(reflect.ValueOf(false))
+				out.Set(falseVal)
 			}
 		}
 		if options.StringToFloat64 && out.Kind() == reflect.Float64 {
 			if f, err := strconv.ParseFloat(in.String(), 64); err == nil {
-				out.Set(reflect.ValueOf(f).Convert(out.Type()))
+				out.Set(reflect.ValueOf(f).Convert(outType))
 			}
 		}
 	}
-	if in.Type().ConvertibleTo(out.Type()) {
-		out.Set(in.Convert(out.Type()))
+	if inType.ConvertibleTo(outType) {
+		out.Set(in.Convert(outType))
 	}
 }
 
@@ -340,16 +356,15 @@ var jsonUnmarshalerType = reflect.TypeOf(new(json.Unmarshaler)).Elem()
 var textMarshalerType = reflect.TypeOf(new(encoding.TextMarshaler)).Elem()
 var textUnmarshalerType = reflect.TypeOf(new(encoding.TextUnmarshaler)).Elem()
 
-func customJson(in, out reflect.Value) (bool, error) {
+func customJson(in reflect.Value, inType reflect.Type, out reflect.Value, outType reflect.Type) (bool, error) {
 	if !out.CanAddr() {
 		return false, nil
 	}
-	inType := in.Type()
-	outType := out.Addr().Type()
+	outType = reflect.PointerTo(outType)
 	inOk := inType.Implements(jsonMarshalerType) || inType.Implements(textMarshalerType)
 	outOk := outType.Implements(jsonUnmarshalerType) || outType.Implements(textUnmarshalerType)
 	if inOk || outOk {
-		if timeFastPath(in, out) {
+		if timeFastPath(in, inType, out, outType) {
 			return true, nil
 		}
 
@@ -364,10 +379,10 @@ func customJson(in, out reflect.Value) (bool, error) {
 	return false, nil
 }
 
-func timeFastPath(in, out reflect.Value) bool {
-	switch in.Type() {
+func timeFastPath(in reflect.Value, inType reflect.Type, out reflect.Value, outType reflect.Type) bool {
+	switch inType {
 	case timeType:
-		switch out.Type() {
+		switch outType {
 		case timeType:
 			out.Set(in)
 			return true
@@ -376,7 +391,7 @@ func timeFastPath(in, out reflect.Value) bool {
 			out.Set(reflect.ValueOf(t.Format(time.RFC3339Nano)))
 		}
 	case timePtrType:
-		switch out.Type() {
+		switch outType {
 		case timePtrType:
 			if !in.IsNil() {
 				outVal := reflect.New(timeType)
@@ -388,7 +403,7 @@ func timeFastPath(in, out reflect.Value) bool {
 			return true
 		}
 	case stringType:
-		switch out.Type() {
+		switch outType {
 		case timeType:
 			t, err := time.Parse(time.RFC3339Nano, in.String())
 			if err == nil {
