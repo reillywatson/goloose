@@ -1,7 +1,6 @@
 package goloose
 
 import (
-	"bytes"
 	"reflect"
 	"sort"
 	"strings"
@@ -44,7 +43,7 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
 // A field represents a single field found in a struct.
 type field struct {
 	name      string
-	namelower []byte
+	namelower string
 
 	tag       bool
 	index     []int
@@ -54,7 +53,7 @@ type field struct {
 }
 
 func fillField(f field) field {
-	f.namelower = bytes.ToLower([]byte(f.name))
+	f.namelower = strings.ToLower(f.name)
 	return f
 }
 

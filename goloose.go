@@ -1,7 +1,6 @@
 package goloose
 
 import (
-	"bytes"
 	"encoding"
 	"encoding/json"
 	"fmt"
@@ -160,7 +159,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 					outFields = cachedTypeFields(outType)
 				}
 				for _, outfield := range outFields {
-					if bytes.Equal(outfield.namelower, field.namelower) {
+					if outfield.namelower == field.namelower {
 						if field.quoted {
 							val = dequote(val)
 						}
@@ -184,7 +183,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 			if key.Kind() != reflect.String {
 				return fmt.Errorf("Only string keys are supported! Kind: %v", key.Kind())
 			}
-			keyStr := []byte(key.String())
+			keyStr := key.String()
 			val := in.MapIndex(key)
 			if val.Kind() == reflect.Interface && !val.IsNil() {
 				val = val.Elem()
@@ -202,18 +201,12 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 				}
 				out.SetMapIndex(key.Convert(outType.Key()), outVal.Elem().Convert(outType.Elem()))
 			case reflect.Struct:
-				// in-place bytes.ToLower
-				for i := 0; i < len(keyStr); i++ {
-					c := keyStr[i]
-					if 'A' <= c && c <= 'Z' {
-						keyStr[i] += 'a' - 'A'
-					}
-				}
+				keyStr = strings.ToLower(keyStr)
 				if len(outFields) == 0 {
 					outFields = cachedTypeFields(outType)
 				}
 				for _, field := range outFields {
-					if bytes.Equal(field.namelower, keyStr) {
+					if field.namelower == keyStr {
 						if field.quoted {
 							val = dequote(val)
 						}
