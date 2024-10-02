@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"reflect"
+	"strconv"
 	"testing"
 	"time"
 )
@@ -511,6 +512,52 @@ func BenchmarkToStruct(b *testing.B) {
 		var foo2 Foo2
 		_ = ToStruct(f, &foo2)
 		_ = foo2
+	}
+}
+
+func BenchmarkStringMapToMapAny(b *testing.B) {
+	in := map[string]string{}
+	for x := 0; x < 1000; x++ {
+		s := strconv.Itoa(x)
+		in[s] = s
+	}
+	for i := 0; i < b.N; i++ {
+		var out map[string]any
+		if err := ToStruct(in, &out); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func TestStringMapToMapAny(t *testing.T) {
+	in := map[string]string{}
+	for x := 0; x < 1000; x++ {
+		s := strconv.Itoa(x)
+		in[s] = s
+	}
+	var out, outSlow map[string]any
+	if err := ToStruct(in, &out); err != nil {
+		t.Fatal(err)
+	}
+	toStructSlow(in, &outSlow)
+	if !reflect.DeepEqual(out, outSlow) {
+		t.Errorf("Got %+v\nExpected: %+v", out, outSlow)
+	}
+}
+
+func TestStringIntMapToMapAny(t *testing.T) {
+	in := map[string]int{}
+	for x := 0; x < 1000; x++ {
+		s := strconv.Itoa(x)
+		in[s] = x
+	}
+	var out, outSlow map[string]any
+	if err := ToStruct(in, &out); err != nil {
+		t.Fatal(err)
+	}
+	toStructSlow(in, &outSlow)
+	if !reflect.DeepEqual(out, outSlow) {
+		t.Errorf("Got %+v\nExpected: %+v", out, outSlow)
 	}
 }
 

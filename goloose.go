@@ -25,6 +25,48 @@ func ConvertTo[T any](in any, options ...Options) (T, error) {
 }
 
 func ToStruct(in, out interface{}, options ...Options) error {
+	var opt Options
+	if len(options) > 1 {
+		return fmt.Errorf("pass at most one Options struct")
+	} else if len(options) == 1 {
+		opt = options[0]
+	}
+
+	if len(opt.Transforms) == 0 {
+		// Hardcode a fast path for a few common cases.
+		// Converting to map[string]any is common, and if we have
+		// primitive types we don't need to do all this reflection (which is ~20x slower)
+		switch inType := in.(type) {
+		case map[string]string:
+			switch out := out.(type) {
+			case *map[string]any:
+				*out = make(map[string]any, len(inType))
+				for k, v := range inType {
+					(*out)[k] = v
+				}
+				return nil
+			}
+		case map[string]float64:
+			switch out := out.(type) {
+			case *map[string]any:
+				*out = make(map[string]any, len(inType))
+				for k, v := range inType {
+					(*out)[k] = v
+				}
+				return nil
+			}
+		case map[string]int:
+			switch out := out.(type) {
+			case *map[string]any:
+				*out = make(map[string]any, len(inType))
+				for k, v := range inType {
+					(*out)[k] = float64(v)
+				}
+				return nil
+			}
+		}
+	}
+
 	inVal := reflect.ValueOf(in)
 	if isNil(inVal) {
 		return nil
@@ -32,13 +74,6 @@ func ToStruct(in, out interface{}, options ...Options) error {
 	outVal := reflect.ValueOf(out)
 	if outVal.Kind() != reflect.Ptr {
 		return fmt.Errorf("out should be a pointer!")
-	}
-
-	var opt Options
-	if len(options) > 1 {
-		return fmt.Errorf("pass at most one Options struct")
-	} else if len(options) == 1 {
-		opt = options[0]
 	}
 
 	err := toStructImpl(inVal, outVal, opt)
