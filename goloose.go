@@ -40,7 +40,9 @@ func ToStruct(in, out interface{}, options ...Options) error {
 		case map[string]string:
 			switch out := out.(type) {
 			case *map[string]any:
-				*out = make(map[string]any, len(inType))
+				if *out == nil && inType != nil {
+					*out = make(map[string]any, len(inType))
+				}
 				for k, v := range inType {
 					(*out)[k] = v
 				}
@@ -49,7 +51,9 @@ func ToStruct(in, out interface{}, options ...Options) error {
 		case map[string]float64:
 			switch out := out.(type) {
 			case *map[string]any:
-				*out = make(map[string]any, len(inType))
+				if *out == nil && inType != nil {
+					*out = make(map[string]any, len(inType))
+				}
 				for k, v := range inType {
 					(*out)[k] = v
 				}
@@ -58,7 +62,9 @@ func ToStruct(in, out interface{}, options ...Options) error {
 		case map[string]int:
 			switch out := out.(type) {
 			case *map[string]any:
-				*out = make(map[string]any, len(inType))
+				if *out == nil && inType != nil {
+					*out = make(map[string]any, len(inType))
+				}
 				for k, v := range inType {
 					(*out)[k] = float64(v)
 				}

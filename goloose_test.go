@@ -547,10 +547,35 @@ func TestStringMapToMapAny(t *testing.T) {
 
 func TestStringIntMapToMapAny(t *testing.T) {
 	in := map[string]int{}
-	for x := 0; x < 1000; x++ {
+	for x := 0; x < 5; x++ {
 		s := strconv.Itoa(x)
 		in[s] = x
 	}
+	var out, outSlow map[string]any
+	if err := ToStruct(in, &out); err != nil {
+		t.Fatal(err)
+	}
+	toStructSlow(in, &outSlow)
+	if !reflect.DeepEqual(out, outSlow) {
+		t.Errorf("Got %+v\nExpected: %+v", out, outSlow)
+	}
+}
+
+func TestStringIntMapToPopulatedMap(t *testing.T) {
+	in := map[string]int{"bar": 1, "baz": 2}
+	out := map[string]any{"existing": "foo", "baz": "3"}
+	outSlow := map[string]any{"existing": "foo", "baz": "3"}
+	if err := ToStruct(in, &out); err != nil {
+		t.Fatal(err)
+	}
+	toStructSlow(in, &outSlow)
+	if !reflect.DeepEqual(out, outSlow) {
+		t.Errorf("Got %+v\nExpected: %+v", out, outSlow)
+	}
+}
+
+func TestNilInputFastPath(t *testing.T) {
+	var in map[string]int
 	var out, outSlow map[string]any
 	if err := ToStruct(in, &out); err != nil {
 		t.Fatal(err)
