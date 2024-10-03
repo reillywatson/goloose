@@ -545,6 +545,30 @@ func TestStringMapToMapAny(t *testing.T) {
 	}
 }
 
+func TestStringMapToMapAnyWithTransforms(t *testing.T) {
+	in := map[string]string{"a": "foo", "b": "bar"}
+	var out map[string]any
+	if err := ToStruct(in, &out, Options{Transforms: []TransformFunc{func(i any) any { return i.(string) + "baz" }}}); err != nil {
+		t.Fatal(err)
+	}
+	exp := map[string]any{"a": "foobaz", "b": "barbaz"}
+
+	if !reflect.DeepEqual(out, exp) {
+		t.Errorf("Got %+v\nExpected: %+v", out, exp)
+	}
+
+	// validate we can return a whole different type in our TransformFunc
+	out = nil
+	if err := ToStruct(in, &out, Options{Transforms: []TransformFunc{func(i any) any { return 3 }}}); err != nil {
+		t.Fatal(err)
+	}
+	exp = map[string]any{"a": 3, "b": 3}
+
+	if !reflect.DeepEqual(out, exp) {
+		t.Errorf("Got %+v\nExpected: %+v", out, exp)
+	}
+}
+
 func TestStringIntMapToMapAny(t *testing.T) {
 	in := map[string]int{}
 	for x := 0; x < 5; x++ {

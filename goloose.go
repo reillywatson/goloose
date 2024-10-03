@@ -32,44 +32,18 @@ func ToStruct(in, out interface{}, options ...Options) error {
 		opt = options[0]
 	}
 
-	if len(opt.Transforms) == 0 {
-		// Hardcode a fast path for a few common cases.
-		// Converting to map[string]any is common, and if we have
-		// primitive types we don't need to do all this reflection (which is ~20x slower)
-		switch inType := in.(type) {
+	// Hardcode a fast path for a few common cases.
+	// Converting to map[string]any is common, and if we have
+	// primitive types we don't need to do all this reflection (which is ~20x slower)
+	switch out := out.(type) {
+	case *map[string]any:
+		switch in := in.(type) {
 		case map[string]string:
-			switch out := out.(type) {
-			case *map[string]any:
-				if *out == nil && inType != nil {
-					*out = make(map[string]any, len(inType))
-				}
-				for k, v := range inType {
-					(*out)[k] = v
-				}
-				return nil
-			}
+			return fastPathMapStringAny(in, out, opt.Transforms)
 		case map[string]float64:
-			switch out := out.(type) {
-			case *map[string]any:
-				if *out == nil && inType != nil {
-					*out = make(map[string]any, len(inType))
-				}
-				for k, v := range inType {
-					(*out)[k] = v
-				}
-				return nil
-			}
+			return fastPathMapStringAny(in, out, opt.Transforms)
 		case map[string]int:
-			switch out := out.(type) {
-			case *map[string]any:
-				if *out == nil && inType != nil {
-					*out = make(map[string]any, len(inType))
-				}
-				for k, v := range inType {
-					(*out)[k] = float64(v)
-				}
-				return nil
-			}
+			return fastPathMapStringAny(in, out, append(opt.Transforms, intToFloat64Transform))
 		}
 	}
 
@@ -84,6 +58,24 @@ func ToStruct(in, out interface{}, options ...Options) error {
 
 	err := toStructImpl(inVal, outVal, opt)
 	return err
+}
+
+func fastPathMapStringAny[E string | float64 | int](in map[string]E, out *map[string]any, transforms []TransformFunc) error {
+	if *out == nil && in != nil {
+		*out = make(map[string]any, len(in))
+	}
+	for k, v := range in {
+		var val any = v
+		for _, fn := range transforms {
+			val = fn(val)
+		}
+		(*out)[k] = val
+	}
+	return nil
+}
+
+func intToFloat64Transform(i any) any {
+	return float64(i.(int))
 }
 
 func toStructImpl(in, out reflect.Value, options Options) error {
