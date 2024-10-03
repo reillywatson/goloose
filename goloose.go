@@ -32,21 +32,6 @@ func ToStruct(in, out interface{}, options ...Options) error {
 		opt = options[0]
 	}
 
-	// Hardcode a fast path for a few common cases.
-	// Converting to map[string]any is common, and if we have
-	// primitive types we don't need to do all this reflection (which is ~20x slower)
-	switch out := out.(type) {
-	case *map[string]any:
-		switch in := in.(type) {
-		case map[string]string:
-			return fastPathMapStringAny(in, out, opt.Transforms)
-		case map[string]float64:
-			return fastPathMapStringAny(in, out, opt.Transforms)
-		case map[string]int:
-			return fastPathMapStringAny(in, out, append(opt.Transforms, intToFloat64Transform))
-		}
-	}
-
 	inVal := reflect.ValueOf(in)
 	if isNil(inVal) {
 		return nil
@@ -60,7 +45,48 @@ func ToStruct(in, out interface{}, options ...Options) error {
 	return err
 }
 
-func fastPathMapStringAny[E string | float64 | int](in map[string]E, out *map[string]any, transforms []TransformFunc) error {
+// Hardcode a fast path for a few common cases.
+// Converting to map[string]any is common, and if we have
+// primitive types we don't need to do all this reflection (which is ~20x slower)
+func fastPathMapStringAny(in, out any, opt Options) (handled bool) {
+	switch out := out.(type) {
+	case *any:
+		if *out == nil && in != nil {
+			switch in := in.(type) {
+			case map[string]string:
+				outMap := make(map[string]any, len(in))
+				fastPathMapStringAnyImpl(in, &outMap, opt.Transforms)
+				*out = outMap
+				return true
+			case map[string]float64:
+				outMap := make(map[string]any, len(in))
+				fastPathMapStringAnyImpl(in, &outMap, opt.Transforms)
+				*out = outMap
+				return true
+			case map[string]int:
+				outMap := make(map[string]any, len(in))
+				fastPathMapStringAnyImpl(in, &outMap, append(opt.Transforms, intToFloat64Transform))
+				*out = outMap
+				return true
+			}
+		}
+	case *map[string]any:
+		switch in := in.(type) {
+		case map[string]string:
+			fastPathMapStringAnyImpl(in, out, opt.Transforms)
+			return true
+		case map[string]float64:
+			fastPathMapStringAnyImpl(in, out, opt.Transforms)
+			return true
+		case map[string]int:
+			fastPathMapStringAnyImpl(in, out, append(opt.Transforms, intToFloat64Transform))
+			return true
+		}
+	}
+	return false
+}
+
+func fastPathMapStringAnyImpl[E string | float64 | int](in map[string]E, out *map[string]any, transforms []TransformFunc) {
 	if *out == nil && in != nil {
 		*out = make(map[string]any, len(in))
 	}
@@ -71,7 +97,6 @@ func fastPathMapStringAny[E string | float64 | int](in map[string]E, out *map[st
 		}
 		(*out)[k] = val
 	}
-	return nil
 }
 
 func intToFloat64Transform(i any) any {
@@ -88,6 +113,11 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 			return nil
 		}
 	}
+
+	if handled := fastPathMapStringAny(in.Interface(), out.Interface(), options); handled {
+		return nil
+	}
+
 	inType := in.Type()
 	outType := out.Type()
 	if handled, err := customJson(in, inType, out, outType); handled {

@@ -545,10 +545,49 @@ func TestStringMapToMapAny(t *testing.T) {
 	}
 }
 
+func TestNestedMap(t *testing.T) {
+	in := map[string]any{
+		"foo": map[string]int{"a": 1},
+		"bar": map[string]string{"b": "c"},
+	}
+	var out, outSlow map[string]any
+	if err := ToStruct(in, &out); err != nil {
+		t.Fatal(err)
+	}
+	toStructSlow(in, &outSlow)
+	if !reflect.DeepEqual(out, outSlow) {
+		t.Errorf("Got %+v\nExpected: %+v", out, outSlow)
+	}
+}
+
+func BenchmarkNestedMap(b *testing.B) {
+	bigMap := map[string]string{}
+	for x := 0; x < 1000; x++ {
+		s := strconv.Itoa(x)
+		bigMap[s] = s
+	}
+	in := map[string]any{
+		"big": bigMap,
+		"foo": map[string]int{"a": 1},
+		"bar": map[string]string{"b": "c"},
+	}
+	for i := 0; i < b.N; i++ {
+		var out map[string]any
+		if err := ToStruct(in, &out); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestStringMapToMapAnyWithTransforms(t *testing.T) {
 	in := map[string]string{"a": "foo", "b": "bar"}
 	var out map[string]any
-	if err := ToStruct(in, &out, Options{Transforms: []TransformFunc{func(i any) any { return i.(string) + "baz" }}}); err != nil {
+	if err := ToStruct(in, &out, Options{Transforms: []TransformFunc{func(i any) any {
+		if str, ok := i.(string); ok {
+			return str + "baz"
+		}
+		return i
+	}}}); err != nil {
 		t.Fatal(err)
 	}
 	exp := map[string]any{"a": "foobaz", "b": "barbaz"}
@@ -559,7 +598,12 @@ func TestStringMapToMapAnyWithTransforms(t *testing.T) {
 
 	// validate we can return a whole different type in our TransformFunc
 	out = nil
-	if err := ToStruct(in, &out, Options{Transforms: []TransformFunc{func(i any) any { return 3 }}}); err != nil {
+	if err := ToStruct(in, &out, Options{Transforms: []TransformFunc{func(i any) any {
+		if _, ok := i.(string); ok {
+			return 3
+		}
+		return i
+	}}}); err != nil {
 		t.Fatal(err)
 	}
 	exp = map[string]any{"a": 3, "b": 3}
