@@ -873,3 +873,15 @@ func TestCustomTextMarshaler(t *testing.T) {
 		t.Errorf("Got %v\nExpected: %v", aErr, bErr)
 	}
 }
+
+func TestRecursiveDataStructureDoesntPanic(t *testing.T) {
+	type RecursiveStructure struct {
+		Recurse *RecursiveStructure
+	}
+	r := &RecursiveStructure{}
+	r.Recurse = r
+	var m map[string]any
+	if err := ToStruct(r, &m); err == nil {
+		t.Error("Expected an error when converting a recursive structure, got none")
+	}
+}

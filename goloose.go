@@ -41,7 +41,7 @@ func ToStruct(in, out interface{}, options ...Options) error {
 		return fmt.Errorf("out should be a pointer!")
 	}
 
-	err := toStructImpl(inVal, outVal, opt)
+	err := toStructImpl(inVal, outVal, opt, 0)
 	return err
 }
 
@@ -103,7 +103,12 @@ func intToFloat64Transform(i any) any {
 	return float64(i.(int))
 }
 
-func toStructImpl(in, out reflect.Value, options Options) error {
+const maxRecursionLevel = 10000
+
+func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) error {
+	if recursionLevel > maxRecursionLevel {
+		return fmt.Errorf("Maximum recursion level reached! You likely have a pointer cycle in your data structure.")
+	}
 	if !in.IsValid() || !in.CanInterface() {
 		return nil
 	}
@@ -132,7 +137,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 		if out.IsNil() {
 			out.Set(reflect.New(outType.Elem()))
 		}
-		return toStructImpl(in, out.Elem(), options)
+		return toStructImpl(in, out.Elem(), options, recursionLevel+1)
 	}
 	if isNil(in) {
 		out.Set(reflect.Zero(outType))
@@ -156,7 +161,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 			switch inType.Kind() {
 			case reflect.Struct, reflect.Map:
 				outVal = reflect.MakeMap(mapStringInterfaceType)
-				err := toStructImpl(in, outVal, options)
+				err := toStructImpl(in, outVal, options, recursionLevel+1)
 				if err != nil {
 					return err
 				}
@@ -165,17 +170,17 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 			case reflect.Slice:
 				outVal = reflect.New(interfaceSliceType)
 			case reflect.Interface:
-				return toStructImpl(in.Elem(), out, options)
+				return toStructImpl(in.Elem(), out, options, recursionLevel+1)
 			default:
 				outVal = reflect.New(inType).Elem()
-				err := toStructImpl(in, outVal, options)
+				err := toStructImpl(in, outVal, options, recursionLevel+1)
 				if err != nil {
 					return err
 				}
 				out.Set(outVal)
 				return nil
 			}
-			err := toStructImpl(in, outVal, options)
+			err := toStructImpl(in, outVal, options, recursionLevel+1)
 			if err != nil {
 				return err
 			}
@@ -211,7 +216,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 					out.Set(outMap)
 				}
 				outVal := reflect.New(outType.Elem())
-				err := toStructImpl(val, outVal, options)
+				err := toStructImpl(val, outVal, options, recursionLevel+1)
 				if err != nil {
 					return err
 				}
@@ -229,7 +234,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 						if val.Kind() == reflect.Ptr && val.IsNil() {
 							continue
 						}
-						err := toStructImpl(val, fieldByIndex(out, outfield.index, true), options)
+						err := toStructImpl(val, fieldByIndex(out, outfield.index, true), options, recursionLevel+1)
 						if err != nil {
 							return err
 						}
@@ -258,7 +263,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 					outMap := reflect.MakeMap(outType)
 					out.Set(outMap)
 				}
-				err := toStructImpl(val, outVal, options)
+				err := toStructImpl(val, outVal, options, recursionLevel+1)
 				if err != nil {
 					return err
 				}
@@ -276,7 +281,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 						if val.Kind() == reflect.Ptr && val.IsNil() {
 							continue
 						}
-						err := toStructImpl(val, fieldByIndex(out, field.index, true), options)
+						err := toStructImpl(val, fieldByIndex(out, field.index, true), options, recursionLevel+1)
 						if err != nil {
 							return err
 						}
@@ -294,7 +299,7 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 		}
 		for i := 0; i < in.Len(); i++ {
 			val := in.Index(i)
-			err := toStructImpl(val, out.Index(i), options)
+			err := toStructImpl(val, out.Index(i), options, recursionLevel+1)
 			if err != nil {
 				return err
 			}
@@ -308,9 +313,9 @@ func toStructImpl(in, out reflect.Value, options Options) error {
 	case reflect.Chan, reflect.Func:
 		// do nothing
 	case reflect.Interface:
-		return toStructImpl(in.Elem(), out, options)
+		return toStructImpl(in.Elem(), out, options, recursionLevel+1)
 	case reflect.Ptr:
-		return toStructImpl(in.Elem(), out, options)
+		return toStructImpl(in.Elem(), out, options, recursionLevel+1)
 	case reflect.UnsafePointer:
 		panic("UnsafePointer not supported!")
 	default:
