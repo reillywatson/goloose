@@ -19,11 +19,12 @@ type TransformFunc func(interface{}) interface{}
 
 // ConvertTo tries to convert in into a T, using JSON marshal/unmarshal semantics.
 // It should be equivalent to this code, but faster:
-// b, err := json.Marshal(in)
-// if err != nil { return T{}, err }
-// var out T
-// err = json.Unmarshal(b, &out)
-// return out, err
+//
+//	b, err := json.Marshal(in)
+//	if err != nil { return T{}, err }
+//	var out T
+//	err = json.Unmarshal(b, &out)
+//	return out, err
 func ConvertTo[T any](in any, options ...Options) (T, error) {
 	var res T
 	err := ToStruct(in, &res, options...)
@@ -32,9 +33,11 @@ func ConvertTo[T any](in any, options ...Options) (T, error) {
 
 // ToStruct tries to convert in into out, using JSON marshal/unmarshal semantics.
 // It should be equivalent to this code, but faster:
-// b, err := json.Marshal(in)
-// if err != nil { return err }
-// return json.Unmarshal(b, out)
+//
+//	b, err := json.Marshal(in)
+//	if err != nil { return err }
+//	return json.Unmarshal(b, out)
+//
 // Note: the semantics for doing this on a nonzero "out" can be surprising,
 // see https://pkg.go.dev/encoding/json#Unmarshal for some details of the behaviour.
 func ToStruct(in, out interface{}, options ...Options) error {
