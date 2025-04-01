@@ -3,6 +3,7 @@ package goloose
 import (
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"reflect"
 	"strconv"
 	"testing"
@@ -883,5 +884,123 @@ func TestRecursiveDataStructureDoesntPanic(t *testing.T) {
 	var m map[string]any
 	if err := ToStruct(r, &m); err == nil {
 		t.Error("Expected an error when converting a recursive structure, got none")
+	}
+}
+
+func TestHugeNumber(t *testing.T) {
+	in := struct{ HugeNumber *big.Int }{}
+	in.HugeNumber = big.NewInt(1)
+	in.HugeNumber, _ = in.HugeNumber.SetString("29157745120982650805953014097632160709947782099779208142451183556177980040665409506504745020886944175204497974977637090690201434791993575900128193797677872701163698274430343501746642052167702180396051675274748307985868208114311186980979298113930938344249665181686754463642448656385800073060075432884342393421100728585824378649245432727133022814294795072203332739083239001036325769762967358033340745798274757230450279572826675736895665366767754201612686011259638464597131009700878517633874689926429545413261363161426209942598516697451476197397103444680968659364909854234919768224131961929083663418258486694435258573213", 10)
+	var a, b map[string]any
+	err := ToStruct(in, &a)
+	err2 := toStructSlow(in, &b)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %+v\nExpected %+v", a, b)
+	}
+}
+
+func TestHugeNumberInStruct(t *testing.T) {
+	in := struct{ HugeNumber *big.Int }{}
+	type outType struct{ HugeNumber *big.Int }
+
+	in.HugeNumber = big.NewInt(1)
+	in.HugeNumber, _ = in.HugeNumber.SetString("29157745120982650805953014097632160709947782099779208142451183556177980040665409506504745020886944175204497974977637090690201434791993575900128193797677872701163698274430343501746642052167702180396051675274748307985868208114311186980979298113930938344249665181686754463642448656385800073060075432884342393421100728585824378649245432727133022814294795072203332739083239001036325769762967358033340745798274757230450279572826675736895665366767754201612686011259638464597131009700878517633874689926429545413261363161426209942598516697451476197397103444680968659364909854234919768224131961929083663418258486694435258573213", 10)
+	var a, b outType
+	err := ToStruct(in, &a)
+	err2 := toStructSlow(in, &b)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(a, b) {
+		t.Errorf("Got %+v\nExpected %+v", a, b)
+	}
+}
+
+func TestNonStringKeysInMaps(t *testing.T) {
+	type Foo struct {
+		A map[any]any `json:"a"`
+	}
+	a := Foo{A: map[any]any{"foo": "bar", 1: "baz"}}
+	var b, c map[string]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+type cantMarshal struct{}
+
+func (cantMarshal) MarshalJSON() ([]byte, error) {
+	return nil, fmt.Errorf("custom error")
+}
+
+type cantUnmarshal struct{}
+
+func (cantUnmarshal) UnmarshalJSON(data []byte) error {
+	return fmt.Errorf("custom error")
+}
+
+func TestCustomJsonMarshalerReturningError(t *testing.T) {
+	type CustomMarshaler struct {
+		Foo cantMarshal `json:"foo"`
+	}
+	var a CustomMarshaler
+	var b, c map[string]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+func TestCustomJsonMarshalerReturningErrorInMap(t *testing.T) {
+	a := map[string]any{"foo": cantMarshal{}}
+	var b, c map[string]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+func TestCustomJsonUnmarshalerReturningError(t *testing.T) {
+	type CustomMarshaler struct {
+		Foo cantUnmarshal `json:"foo"`
+	}
+	var a CustomMarshaler
+	var b, c map[string]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+func TestCustomJsonUnmarshalerReturningErrorInMap(t *testing.T) {
+	a := map[string]any{"foo": cantUnmarshal{}}
+	var b, c map[string]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
 	}
 }

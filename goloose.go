@@ -3,6 +3,7 @@ package goloose
 import (
 	"encoding"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"reflect"
 	"strconv"
@@ -54,10 +55,15 @@ func ToStruct(in, out interface{}, options ...Options) error {
 	}
 	outVal := reflect.ValueOf(out)
 	if outVal.Kind() != reflect.Ptr {
-		return fmt.Errorf("out should be a pointer!")
+		return fmt.Errorf("non-pointer type %T passed to ToStruct", out)
 	}
 
 	err := toStructImpl(inVal, outVal, opt, 0)
+	var skipValError *skipValError
+	for errors.As(err, &skipValError) {
+		// this is internal, unwrap it for the caller
+		err = skipValError.err
+	}
 	return err
 }
 
@@ -123,7 +129,7 @@ const maxRecursionLevel = 10000
 
 func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) error {
 	if recursionLevel > maxRecursionLevel {
-		return fmt.Errorf("Maximum recursion level reached! You likely have a pointer cycle in your data structure.")
+		return fmt.Errorf("maximum recursion level reached, you likely have a pointer cycle in your data structure")
 	}
 	if !in.IsValid() || !in.CanInterface() {
 		return nil
@@ -178,11 +184,11 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 			case reflect.Struct, reflect.Map:
 				outVal = reflect.MakeMap(mapStringInterfaceType)
 				err := toStructImpl(in, outVal, options, recursionLevel+1)
-				if err != nil {
-					return err
+				var skipErr *skipValError
+				if !errors.As(err, &skipErr) {
+					out.Set(outVal)
 				}
-				out.Set(outVal)
-				return nil
+				return err
 			case reflect.Slice:
 				outVal = reflect.New(interfaceSliceType)
 			case reflect.Interface:
@@ -197,11 +203,8 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				return nil
 			}
 			err := toStructImpl(in, outVal, options, recursionLevel+1)
-			if err != nil {
-				return err
-			}
 			out.Set(outVal.Elem())
-			return nil
+			return err
 		}
 		// it would be nice to handle this more performantly, but there are some edge cases that need to be considered more thoroughly!
 		return toStructSlow(in.Interface(), out.Addr().Interface())
@@ -227,17 +230,20 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 			}
 			switch out.Kind() {
 			case reflect.Map:
-				if out.IsNil() {
-					outMap := reflect.MakeMap(outType)
-					out.Set(outMap)
-				}
 				outVal := reflect.New(outType.Elem())
 				err := toStructImpl(val, outVal, options, recursionLevel+1)
+				var skipErr *skipValError
+				if !errors.As(err, &skipErr) {
+					if out.IsNil() {
+						outMap := reflect.MakeMap(outType)
+						out.Set(outMap)
+					}
+					nameVal := reflect.ValueOf(string(field.name)).Convert(outType.Key())
+					out.SetMapIndex(nameVal, outVal.Elem())
+				}
 				if err != nil {
 					return err
 				}
-				nameVal := reflect.ValueOf(string(field.name)).Convert(outType.Key())
-				out.SetMapIndex(nameVal, outVal.Elem())
 			case reflect.Struct:
 				if len(outFields) == 0 {
 					outFields = cachedTypeFields(outType)
@@ -265,7 +271,7 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 		}
 		for _, key := range in.MapKeys() {
 			if key.Kind() != reflect.String {
-				return fmt.Errorf("Only string keys are supported! Kind: %v", key.Kind())
+				return &skipValError{err: &json.UnsupportedTypeError{Type: key.Type()}}
 			}
 			keyStr := key.String()
 			val := in.MapIndex(key)
@@ -275,15 +281,18 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 			switch out.Kind() {
 			case reflect.Map:
 				outVal := reflect.New(toJsonType(outType.Elem()))
-				if out.IsNil() {
-					outMap := reflect.MakeMap(outType)
-					out.Set(outMap)
-				}
 				err := toStructImpl(val, outVal, options, recursionLevel+1)
+				var skipErr *skipValError
+				if !errors.As(err, &skipErr) {
+					if out.IsNil() {
+						outMap := reflect.MakeMap(outType)
+						out.Set(outMap)
+					}
+					out.SetMapIndex(key.Convert(outType.Key()), outVal.Elem().Convert(outType.Elem()))
+				}
 				if err != nil {
 					return err
 				}
-				out.SetMapIndex(key.Convert(outType.Key()), outVal.Elem().Convert(outType.Elem()))
 			case reflect.Struct:
 				keyStr = strings.ToLower(keyStr)
 				if len(outFields) == 0 {
@@ -339,6 +348,11 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 	}
 	return nil
 }
+
+type skipValError struct{ err error }
+
+func (e *skipValError) Unwrap() error { return e.err }
+func (e *skipValError) Error() string { return e.err.Error() }
 
 var trueVal = reflect.ValueOf(true)
 var falseVal = reflect.ValueOf(false)
@@ -447,10 +461,13 @@ func customJson(in reflect.Value, inType reflect.Type, out reflect.Value, outTyp
 
 		b, err := json.Marshal(in.Interface())
 		if err != nil {
-			return true, err
+			return true, &skipValError{err: err}
 		}
 		outInter := out.Addr().Interface()
 		err = json.Unmarshal(b, &outInter)
+		if err != nil {
+			return true, err
+		}
 		return true, err
 	}
 	return false, nil
