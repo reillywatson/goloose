@@ -1004,3 +1004,81 @@ func TestCustomJsonUnmarshalerReturningErrorInMap(t *testing.T) {
 		t.Errorf("Got %+v\nExpected %+v", b, c)
 	}
 }
+
+func TestIntMapToMapIntAny(t *testing.T) {
+	a := map[int]string{1: "foo"}
+	var b, c map[int]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+func TestIntMapToMapStringAny(t *testing.T) {
+	a := map[int]string{1: "foo"}
+	var b, c map[string]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+func TestStringMapToMapIntAnyWithNumericKeys(t *testing.T) {
+	a := map[string]string{"1": "foo", "2": "bar"}
+	var b, c map[int]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+func TestStringMapToMapIntAnyWithMixedNumericAndNonNumericKeys(t *testing.T) {
+	a := map[string]string{"1": "foo", "bar": "baz"}
+	var b, c map[int]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+func TestMapAnyAnyToMapIntAny(t *testing.T) {
+	a := map[any]any{"1": "foo", 2: "baz"}
+	var b, c map[int]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+func TestMapAnyAnyToMapAnyAny(t *testing.T) {
+	a := map[any]any{"1": "foo", 2: "baz"}
+	var b, c map[any]any
+	err := ToStruct(a, &b)
+	err2 := toStructSlow(a, &c)
+	if (err != nil) != (err2 != nil) {
+		t.Errorf("Got %+v\nExpected: %+v", err, err2)
+	}
+	if !reflect.DeepEqual(b, c) {
+		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
