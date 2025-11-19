@@ -269,6 +269,7 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 		if out.Kind() != reflect.Map && out.Kind() != reflect.Struct {
 			return nil
 		}
+		var lastErr error
 		for _, key := range in.MapKeys() {
 			var keyStr string
 			switch key.Kind() {
@@ -306,19 +307,22 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 					n, err := strconv.ParseInt(keyStr, 10, 64)
 					if err != nil || outKeyType.OverflowInt(n) {
-						return &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
+						lastErr = &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
+						continue
 					}
 					outKey = reflect.New(outKeyType).Elem()
 					outKey.SetInt(n)
 				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 					n, err := strconv.ParseUint(keyStr, 10, 64)
 					if err != nil || outKeyType.OverflowUint(n) {
-						return &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
+						lastErr = &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
+						continue
 					}
 					outKey = reflect.New(outKeyType).Elem()
 					outKey.SetUint(n)
 				default:
-					return &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
+					lastErr = &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
+					continue
 				}
 				if outKey.IsValid() {
 					out.SetMapIndex(outKey, outVal.Elem().Convert(outType.Elem()))
@@ -344,6 +348,7 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				}
 			}
 		}
+		return lastErr
 	case reflect.Slice:
 		if out.Kind() != reflect.Slice {
 			return nil
