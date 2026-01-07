@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var A=0([0!}0=struct\n00A\nA struct 00A'000")

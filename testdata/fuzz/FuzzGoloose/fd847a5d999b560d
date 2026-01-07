@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var A=struct{A[]A}{\"00\"}\nvar B struct{A``0\"0\"`\n`0A\"0\"`\n0")

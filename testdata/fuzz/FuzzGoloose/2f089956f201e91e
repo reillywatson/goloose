@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var A=map[string]any{\"\":\"\",\"\":map[string]any{\"\":\"\"}}\nvar B=struct{A*A000}{}")

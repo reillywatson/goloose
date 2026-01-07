@@ -1,0 +1,2 @@
+go test fuzz v1
+string("va#\"\nvar 0#,\x00\x00\"")

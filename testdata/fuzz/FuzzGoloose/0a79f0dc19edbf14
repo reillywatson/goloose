@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var in = map[string]\"ny{\"a\": \"fooa, \"b\": \"bar\"}\n\tvar out = struct{\n\tA string `json:\"a\"`\n}{}")

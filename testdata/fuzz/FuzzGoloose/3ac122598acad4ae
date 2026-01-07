@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var A=struct{A string\nB[]A``}{}\nvar B=struct{A string`json:\"a\"`\nB[]int`json:\"`}{}")

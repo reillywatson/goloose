@@ -1,0 +1,2 @@
+go test fuzz v1
+string("'0000000\xe7\x82000巔\xe200\xee\xce0ǒ0ə0000\xdf000\xd6\xcc0000\xcd00000000000\xc70000\xf0000000\xdd\xcb0ܢ")

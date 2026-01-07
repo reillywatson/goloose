@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var in = map[string]any{\"a\": \"foo\", \"b\": map[string]any{\"bar\":\"baz\"}}\nvar out = struct{\nA *string `json:\"a\"`\nB *struct {\n\tBar strind `json:\"bar\"`\n} `js`\n}{}")

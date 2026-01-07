@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var A *00000000\x1e\n!00")

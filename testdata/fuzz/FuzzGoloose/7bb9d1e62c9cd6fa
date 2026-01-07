@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var 0=A{\"\"0\"\"!000A{\"\"0A!00A{00A\"0\n00A{00A\"0\n0A")

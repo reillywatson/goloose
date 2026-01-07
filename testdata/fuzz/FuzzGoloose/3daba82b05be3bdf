@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var A=map[A]A{\"\",\"\"\x00\nvar A=struct{A\n}")

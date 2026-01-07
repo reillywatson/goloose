@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var A=struct{A0 string`\x10`\nAa int}{\"00\",0}\nvar B=A0")

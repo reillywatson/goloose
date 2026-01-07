@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var 0=0(0800\"\"080A``!0\xef\xea\xea\xea\xea\xea\xea\xea\xea0")

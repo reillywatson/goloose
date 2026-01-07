@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var in = struct{\nA0*string `\x10`\nA1*int ``\n\t\t}{\"foo\", 1}\nvar out = struct{\nA0*string `00`\nA1*int ``\n}{}")

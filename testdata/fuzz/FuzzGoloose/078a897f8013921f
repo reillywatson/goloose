@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var A=A\x05\xff\xff\x05``00A``0A!\"\"!0A!var B=struct{A A}{}")

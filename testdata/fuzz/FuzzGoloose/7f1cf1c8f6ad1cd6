@@ -1,0 +1,2 @@
+go test fuzz v1
+string("0#\xff\xff#var \x95\xce0")

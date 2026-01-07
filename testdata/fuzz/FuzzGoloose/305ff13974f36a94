@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var 0)var 0")

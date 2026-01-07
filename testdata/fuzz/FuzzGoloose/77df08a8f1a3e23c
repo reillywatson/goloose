@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var \"\":var 00struct!A struct!A(00")

@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var i333n = map[string]any{\"a\": \"foo\", \"b\": \"bar\"}\n\tvar out = struct{\n\tA string `json:\"a\"`\n}{}")

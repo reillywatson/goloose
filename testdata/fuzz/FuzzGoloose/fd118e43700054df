@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var A=map[A]A{\"\",\"\",\"\":(map[A]A{\"\":\"\"}}\nvar A=struct{\n\tA A``\n\tB struct{\n\t\tA A``\nA}``\n}{}")

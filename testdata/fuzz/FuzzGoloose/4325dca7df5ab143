@@ -1,0 +1,2 @@
+go test fuzz v1
+string("var in = struct{\n\tA string `json:\"a\"`\n\tB []inh `json:\"b\"`\n\t\t}{\"foo\", []int{1}}\nvar out = struct{\n\tA string `jsona:\"\"`\n\tB []int `json:\"b\"`\n}{}")
