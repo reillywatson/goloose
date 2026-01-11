@@ -283,36 +283,57 @@ func dominantField(fields []field) (field, bool) {
 	return fields[0], true
 }
 
+type fieldCacheEntry struct {
+	fields  []field
+	byLower map[string][]int
+}
+
 var fieldCache struct {
-	value atomic.Value // map[reflect.Type][]field
+	value atomic.Value // map[reflect.Type]fieldCacheEntry
 	mu    sync.Mutex   // used only by writers
 }
 
 // cachedTypeFields is like typeFields but uses a cache to avoid repeated work.
 func cachedTypeFields(t reflect.Type) []field {
-	m, _ := fieldCache.value.Load().(map[reflect.Type][]field)
-	f := m[t]
-	if f != nil {
-		return f
+	return cachedTypeFieldsEntry(t).fields
+}
+
+func cachedTypeFieldsByLower(t reflect.Type) map[string][]int {
+	return cachedTypeFieldsEntry(t).byLower
+}
+
+func cachedTypeFieldsEntry(t reflect.Type) fieldCacheEntry {
+	m, _ := fieldCache.value.Load().(map[reflect.Type]fieldCacheEntry)
+	if entry, ok := m[t]; ok {
+		return entry
 	}
 
 	// Compute fields without lock.
 	// Might duplicate effort but won't hold other computations back.
-	f = typeFields(t)
-	if f == nil {
-		f = []field{}
+	fields := typeFields(t)
+	if fields == nil {
+		fields = []field{}
 	}
+	byLower := make(map[string][]int, len(fields))
+	for i, f := range fields {
+		byLower[f.namelower] = append(byLower[f.namelower], i)
+	}
+	entry := fieldCacheEntry{fields: fields, byLower: byLower}
 
 	fieldCache.mu.Lock()
-	m, _ = fieldCache.value.Load().(map[reflect.Type][]field)
-	newM := make(map[reflect.Type][]field, len(m)+1)
+	m, _ = fieldCache.value.Load().(map[reflect.Type]fieldCacheEntry)
+	if existing, ok := m[t]; ok {
+		fieldCache.mu.Unlock()
+		return existing
+	}
+	newM := make(map[reflect.Type]fieldCacheEntry, len(m)+1)
 	for k, v := range m {
 		newM[k] = v
 	}
-	newM[t] = f
+	newM[t] = entry
 	fieldCache.value.Store(newM)
 	fieldCache.mu.Unlock()
-	return f
+	return entry
 }
 
 func fieldByIndex(v reflect.Value, index []int, alloc bool) reflect.Value {

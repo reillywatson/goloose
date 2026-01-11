@@ -210,6 +210,7 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 		return toStructSlow(in.Interface(), out.Addr().Interface())
 	}
 	var outFields []field
+	var outFieldsByLower map[string][]int
 
 	switch in.Kind() {
 	case reflect.Struct:
@@ -235,7 +236,7 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				var skipErr *skipValError
 				if !errors.As(err, &skipErr) {
 					if out.IsNil() {
-						outMap := reflect.MakeMap(outType)
+						outMap := reflect.MakeMapWithSize(outType, len(fields))
 						out.Set(outMap)
 					}
 					nameVal := reflect.ValueOf(string(field.name)).Convert(outType.Key())
@@ -245,14 +246,14 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 					return err
 				}
 			case reflect.Struct:
-				if len(outFields) == 0 {
-					outFields = cachedTypeFields(outType)
+				if outFieldsByLower == nil {
+					entry := cachedTypeFieldsEntry(outType)
+					outFields = entry.fields
+					outFieldsByLower = entry.byLower
 				}
-				for _, outfield := range outFields {
-					if outfield.namelower == field.namelower {
-						if field.quoted {
-							val = dequote(val)
-						}
+				if matchIdxs, ok := outFieldsByLower[field.namelower]; ok {
+					for _, idx := range matchIdxs {
+						outfield := outFields[idx]
 						if val.Kind() == reflect.Ptr && val.IsNil() {
 							continue
 						}
@@ -270,70 +271,117 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 			return nil
 		}
 		var lastErr error
-		for _, key := range in.MapKeys() {
-			var keyStr string
-			switch key.Kind() {
-			case reflect.String:
-				keyStr = key.String()
-			case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-				keyStr = strconv.FormatInt(key.Int(), 10)
-			case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-				keyStr = strconv.FormatUint(key.Uint(), 10)
-			default:
-				return &skipValError{err: &json.UnsupportedTypeError{Type: key.Type()}}
+		outIsMap := out.Kind() == reflect.Map
+		var outKeyType, outElemType reflect.Type
+		if outIsMap {
+			outKeyType = outType.Key()
+			outElemType = outType.Elem()
+		}
+		inKeyType := inType.Key()
+		keyKind := inKeyType.Kind()
+		directKey := false
+		if outIsMap && outKeyType == inKeyType {
+			switch keyKind {
+			case reflect.String,
+				reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+				reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+				directKey = true
 			}
-			val := in.MapIndex(key)
+		}
+		if keyKind != reflect.Interface {
+			switch keyKind {
+			case reflect.String,
+				reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+				reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			default:
+				return &skipValError{err: &json.UnsupportedTypeError{Type: inKeyType}}
+			}
+		}
+		iter := in.MapRange()
+		for iter.Next() {
+			key := iter.Key()
+			var keyStr string
+			var outKey reflect.Value
+			if outIsMap && directKey {
+				outKey = key
+			} else {
+				if keyKind == reflect.Interface {
+					switch key.Kind() {
+					case reflect.String:
+						keyStr = key.String()
+					case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+						keyStr = strconv.FormatInt(key.Int(), 10)
+					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+						keyStr = strconv.FormatUint(key.Uint(), 10)
+					default:
+						return &skipValError{err: &json.UnsupportedTypeError{Type: key.Type()}}
+					}
+				} else {
+					switch keyKind {
+					case reflect.String:
+						keyStr = key.String()
+					case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+						keyStr = strconv.FormatInt(key.Int(), 10)
+					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+						keyStr = strconv.FormatUint(key.Uint(), 10)
+					}
+				}
+			}
+			val := iter.Value()
 			if val.Kind() == reflect.Interface && !val.IsNil() {
 				val = val.Elem()
 			}
 			switch out.Kind() {
 			case reflect.Map:
-				outVal := reflect.New(toJsonType(outType.Elem()))
+				outVal := reflect.New(toJsonType(outElemType))
 				err := toStructImpl(val, outVal, options, recursionLevel+1)
 				var skipErr *skipValError
 				if errors.As(err, &skipErr) {
 					return err
 				}
-				if out.IsNil() {
-					outMap := reflect.MakeMap(outType)
-					out.Set(outMap)
-				}
-				outKeyType := outType.Key()
-				var outKey reflect.Value
-				switch outKeyType.Kind() {
-				case reflect.String:
-					outKey = reflect.New(outKeyType).Elem()
-					outKey.SetString(keyStr)
-				case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-					n, err := strconv.ParseInt(keyStr, 10, 64)
-					if err != nil || outKeyType.OverflowInt(n) {
+				if !outKey.IsValid() {
+					switch outKeyType.Kind() {
+					case reflect.String:
+						outKey = reflect.New(outKeyType).Elem()
+						outKey.SetString(keyStr)
+					case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+						n, err := strconv.ParseInt(keyStr, 10, 64)
+						if err != nil || outKeyType.OverflowInt(n) {
+							lastErr = &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
+							continue
+						}
+						outKey = reflect.New(outKeyType).Elem()
+						outKey.SetInt(n)
+					case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+						n, err := strconv.ParseUint(keyStr, 10, 64)
+						if err != nil || outKeyType.OverflowUint(n) {
+							lastErr = &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
+							continue
+						}
+						outKey = reflect.New(outKeyType).Elem()
+						outKey.SetUint(n)
+					default:
 						lastErr = &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
 						continue
 					}
-					outKey = reflect.New(outKeyType).Elem()
-					outKey.SetInt(n)
-				case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-					n, err := strconv.ParseUint(keyStr, 10, 64)
-					if err != nil || outKeyType.OverflowUint(n) {
-						lastErr = &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
-						continue
-					}
-					outKey = reflect.New(outKeyType).Elem()
-					outKey.SetUint(n)
-				default:
-					lastErr = &json.UnmarshalTypeError{Value: "number " + keyStr, Type: outKeyType}
-					continue
 				}
 				if outKey.IsValid() {
-					out.SetMapIndex(outKey, outVal.Elem().Convert(outType.Elem()))
+					if out.IsNil() {
+						outMap := reflect.MakeMapWithSize(outType, in.Len())
+						out.Set(outMap)
+					}
+					out.SetMapIndex(outKey, outVal.Elem().Convert(outElemType))
 				}
 			case reflect.Struct:
 				keyStr = strings.ToLower(keyStr)
-				if len(outFields) == 0 {
-					outFields = cachedTypeFields(outType)
+				if outFieldsByLower == nil {
+					entry := cachedTypeFieldsEntry(outType)
+					outFields = entry.fields
+					outFieldsByLower = entry.byLower
 				}
-				for _, field := range outFields {
-					if field.namelower == keyStr {
+				if matchIdxs, ok := outFieldsByLower[keyStr]; ok {
+					for _, idx := range matchIdxs {
+						field := outFields[idx]
 						if field.quoted {
 							val = dequote(val)
 						}

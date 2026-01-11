@@ -580,6 +580,54 @@ func BenchmarkNestedMap(b *testing.B) {
 	}
 }
 
+func BenchmarkMapToStructLarge(b *testing.B) {
+	type Big struct {
+		F0  int `json:"f0"`
+		F1  int `json:"f1"`
+		F2  int `json:"f2"`
+		F3  int `json:"f3"`
+		F4  int `json:"f4"`
+		F5  int `json:"f5"`
+		F6  int `json:"f6"`
+		F7  int `json:"f7"`
+		F8  int `json:"f8"`
+		F9  int `json:"f9"`
+		F10 int `json:"f10"`
+		F11 int `json:"f11"`
+		F12 int `json:"f12"`
+		F13 int `json:"f13"`
+		F14 int `json:"f14"`
+		F15 int `json:"f15"`
+		F16 int `json:"f16"`
+		F17 int `json:"f17"`
+		F18 int `json:"f18"`
+		F19 int `json:"f19"`
+		F20 int `json:"f20"`
+		F21 int `json:"f21"`
+		F22 int `json:"f22"`
+		F23 int `json:"f23"`
+		F24 int `json:"f24"`
+		F25 int `json:"f25"`
+		F26 int `json:"f26"`
+		F27 int `json:"f27"`
+		F28 int `json:"f28"`
+		F29 int `json:"f29"`
+		F30 int `json:"f30"`
+		F31 int `json:"f31"`
+	}
+	in := make(map[string]any, 32)
+	for i := 0; i < 32; i++ {
+		in["f"+strconv.Itoa(i)] = i
+	}
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		var out Big
+		if err := ToStruct(in, &out); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func TestStringMapToMapAnyWithTransforms(t *testing.T) {
 	in := map[string]string{"a": "foo", "b": "bar"}
 	var out map[string]any
