@@ -153,16 +153,35 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 			return unmarshalNull(out)
 		}
 	}
+	inType := in.Type()
+	outType := out.Type()
+	// Matching built-in scalars cannot have custom JSON methods or contain
+	// nulls. Copy them without the container and marshaler checks below.
+	if inType == outType && inType.PkgPath() == "" {
+		switch in.Kind() {
+		case reflect.Bool,
+			reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+			reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr,
+			reflect.Float32, reflect.Float64:
+			out.Set(in)
+			return nil
+		case reflect.String:
+			out.SetString(replaceInvalidUTF8(in.String()))
+			return nil
+		}
+	}
 	if isJSONNull(in) {
 		return unmarshalNull(out)
 	}
 
-	if handled := fastPathMapStringAny(in.Interface(), out.Interface(), options); handled {
-		return nil
+	// The map fast paths only accept pointer destinations. Avoid boxing every
+	// scalar destination (and allocating a copy) just to reject it.
+	if out.Kind() == reflect.Ptr {
+		if handled := fastPathMapStringAny(in.Interface(), out.Interface(), options); handled {
+			return nil
+		}
 	}
 
-	inType := in.Type()
-	outType := out.Type()
 	if handled, err := customJson(in, inType, out, outType); handled {
 		return err
 	}
@@ -340,6 +359,10 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 			sort.Slice(orderedKeys, func(i, j int) bool { return orderedKeys[i].String() < orderedKeys[j].String() })
 		}
 		iter := in.MapRange()
+		// Reuse storage instead of allocating a key and value for every entry.
+		// Conversion consumes each entry before advancing the iterator.
+		iterKey := reflect.New(inType.Key()).Elem()
+		iterValue := reflect.New(inType.Elem()).Elem()
 		for i := 0; ; i++ {
 			var key, val reflect.Value
 			if orderedKeys != nil {
@@ -352,7 +375,9 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				if !iter.Next() {
 					break
 				}
-				key, val = iter.Key(), iter.Value()
+				iterKey.SetIterKey(iter)
+				iterValue.SetIterValue(iter)
+				key, val = iterKey, iterValue
 			}
 			var keyStr string
 			var outKey reflect.Value
