@@ -1,361 +1,291 @@
 package goloose
 
 import (
+	"encoding/json"
 	"fmt"
-	"go/ast"
-	"go/parser"
-	"go/token"
+	"math"
 	"reflect"
-	"strconv"
-	"strings"
 	"testing"
-	"unicode"
-	"unicode/utf8"
 )
 
+// FuzzGoloose treats its input as a recipe for Go types and values, not Go source.
+// Every mutation produces a valid value, including empty and truncated inputs.
 func FuzzGoloose(f *testing.F) {
-	debugging := false
-
-	testcases := []string{
-		`var in = struct{
-	A string ` + "`" + `json:"a"` + "`" + `
-	B int ` + "`" + `json:"b"` + "`" + `
-		}{"foo", 1}
-var out = struct{
-	A string ` + "`" + `json:"a"` + "`" + `
-	B int ` + "`" + `json:"b"` + "`" + `
-}{}`,
-		`var in = struct{
-	A string ` + "`" + `json:"a"` + "`" + `
-	B []int ` + "`" + `json:"b"` + "`" + `
-		}{"foo", []int{1}}
-var out = struct{
-	A string ` + "`" + `json:"a"` + "`" + `
-	B []int ` + "`" + `json:"b"` + "`" + `
-}{}`,
-		`var in = map[string]any{"a": "foo", "b": "bar"}
-	var out = struct{
-	A string ` + "`" + `json:"a"` + "`" + `
-}{}`,
-		`var in = map[string]any{"a": "foo", "b": map[string]any{"bar":"baz"}}
-	var out = struct{
-	A string ` + "`" + `json:"a"` + "`" + `
-	B struct {
-		Bar string ` + "`" + `json:"bar"` + "`" + `
-	} ` + "`" + `json:"b"` + "`" + `
-}{}`,
-		`var in = map[string]any{"a": "foo", "b": map[string]any{"bar":"baz"}}
-var out = struct{
-A *string ` + "`" + `json:"a"` + "`" + `
-B *struct {
-	Bar string ` + "`" + `json:"bar"` + "`" + `
-} ` + "`" + `json:"b"` + "`" + `
-}{}`,
+	for _, seed := range fuzzSeeds {
+		f.Add(seed)
 	}
-	for _, tc := range testcases {
-		f.Add(tc)
-	}
-
-	f.Fuzz(func(t *testing.T, code string) {
-		src := fmt.Sprintf("package main\n\n%s", code)
-		fset := token.NewFileSet()
-		file, err := parser.ParseFile(fset, "", src, parser.DeclarationErrors|parser.AllErrors)
+	f.Fuzz(func(t *testing.T, data string) {
+		c := generateFuzzCase(data)
+		encoded, err := json.Marshal(c.in)
 		if err != nil {
-			if stringInList(testcases, code) {
-				t.Errorf("seed corpus entry failed to parse! Error:\n%v", err)
+			t.Fatalf("generator produced a non-JSON input: %v", err)
+		}
+		// Goloose deliberately accepts some conversions JSON rejects (e.g.
+		// strings to bools). Compare the domain where JSON conversion succeeds.
+		if err := json.Unmarshal(encoded, c.want.Interface()); err != nil {
+			return
+		}
+		initial := fmt.Sprintf("%#v", c.got.Elem().Interface())
+		defer func() {
+			if p := recover(); p != nil {
+				t.Fatalf("ToStruct panicked: %v\ninput (%T): %#v\nJSON: %s\ndestination: %v\ninitial: %s",
+					p, c.in, c.in, encoded, c.got.Elem().Type(), initial)
 			}
-			return
+		}()
+		if err := ToStruct(c.in, c.got.Interface()); err != nil {
+			t.Fatalf("ToStruct failed: %v\ninput (%T): %#v\nJSON: %s\ndestination: %v\ninitial: %s",
+				err, c.in, c.in, encoded, c.got.Elem().Type(), initial)
 		}
-		if len(file.Decls) != 2 {
-			return
+		if !reflect.DeepEqual(c.got.Elem().Interface(), c.want.Elem().Interface()) {
+			t.Fatalf("input (%T): %#v\nJSON: %s\ndestination: %v\ninitial: %s\ngot: %#v\nwant: %#v",
+				c.in, c.in, encoded, c.got.Elem().Type(), initial, c.got.Elem().Interface(), c.want.Elem().Interface())
 		}
-		validateFuzz(t, file.Decls[0], file.Decls[1], code, debugging)
-		validateFuzz(t, file.Decls[1], file.Decls[0], code, debugging)
 	})
 }
 
-func validateFuzz(t *testing.T, inDecl, outDecl ast.Decl, code string, debugging bool) {
-	parseErr := func(code string, err error) {
-		if debugging {
-			fmt.Println("Parse error: ", err)
-			fmt.Println(code)
-		}
-	}
-	in, err := loadTypespecFromAST(inDecl)
-	if err != nil {
-		parseErr(code, err)
-		return
-	}
-	out, err := loadTypespecFromAST(outDecl)
-	if err != nil {
-		parseErr(code, err)
-		return
-	}
-	outSlow, err := loadTypespecFromAST(outDecl)
-	if err != nil {
-		parseErr(code, err)
-		return
-	}
-	if in == nil || out == nil || outSlow == nil {
-		parseErr(code, fmt.Errorf("didn't generate types"))
-		return
-	}
-	if strings.Contains(reflect.TypeOf(in).String(), "reflect.") || strings.Contains(reflect.TypeOf(out).String(), "reflect.") {
-		parseErr(code, fmt.Errorf("unexpected results! In: %+#v, Out: %+#v", in, out))
-		return
-	}
-	if err := ToStruct(in, &out); err != nil {
-		if err := toStructSlow(in, &outSlow); err == nil {
-			t.Errorf("ToStruct failed but toStructSlow succeeded! Error: %v", err)
-		}
-		return
-	}
-	if debugging {
-		fmt.Println("IN:", toJson(in), "OUT:", toJson(out))
-	}
-	if err := toStructSlow(in, &outSlow); err != nil {
-		return // can't JSON compare!
-	}
-	if !reflect.DeepEqual(out, outSlow) {
-		t.Errorf("Got %+v\nExpected %+v", out, outSlow)
-	}
+// The first two bytes select the conversion mode and whether to populate the
+// destination. The rest select types, then input and destination values. Keep
+// these seeds small so mutations and minimization can change individual choices.
+var fuzzSeeds = []string{
+	"",                                                     // string
+	"\x00\x00\x01\x01",                                     // bool
+	"\x00\x00\x02\x00\x01\x00\x2a",                         // int to int8
+	"\x00\x00\x03\x00\x03\x01a\x01b",                       // []string
+	"\x00\x00\x04\x00\x00\x00\x02\x01k\x01v",               // map[string]string
+	"\x00\x00\x05\x00\x01\x00\x03foo",                      // tagged struct
+	"\x01\x00\x05\x00\x01\x00\x03foo",                      // struct to any
+	"\x02\x00\x05\x00\x01\x00\x03foo",                      // struct to map
+	"\x03\x00\x05\x00\x01\x00\x03foo",                      // JSON map to struct
+	"\x00\x00\x06\x00\x01\x01x",                            // *string
+	"\x00\x00\x07\x01\x01x",                                // interface containing a string
+	"\x00\x01\x00\x03new\x03old",                           // populated destination
+	"\x00\x00\x05\x00\x01\x03\x02\x00\x0b\x02\x00\x2a",     // struct containing []int to []float64
+	"\x03\x00\x05\x00\x01\x06\x00\x01\x03foo",              // JSON map to struct with *string
+	"\x03\x00\x05\x00\x01\x05\x00\x01\x00\x03foo",          // JSON map to nested struct
+	"\x00\x00\x03\x00\x00",                                 // nil slice
+	"\x00\x00\x03\x00\x01",                                 // empty slice
+	"\x01\x00\x05\x00\x02\x00",                             // omitempty
+	"\x00\x00\x05\x00\x04\x01\x01",                         // bool with ,string
+	"\x00\x01\x03\x00\x02\x01x\x02\x01y",                   // populated slice
+	"\x00\x01\x04\x00\x00\x00\x02\x01k\x01v\x02\x01m\x01n", // populated map
+	"\x00\x00\x02\x04\x04\x01",                             // max int64, without float64 precision loss
 }
 
-func loadTypespecFromAST(expr any) (any, error) {
-	switch expr := expr.(type) {
-	case *ast.ValueSpec:
-		if len(expr.Values) != 1 {
-			return nil, fmt.Errorf("unexpected values count %d", len(expr.Values))
-		}
-		return loadTypespecFromAST(expr.Values[0])
-	case *ast.CompositeLit:
-		typedef, err := loadTypespecFromAST(expr.Type)
-		if err != nil {
-			return nil, err
-		}
-		structDef, ok := typedef.(reflect.Type)
-		if !ok {
-			return nil, fmt.Errorf("expected reflect.Type, got %q", reflect.TypeOf(typedef))
-		}
-		val := reflect.New(structDef).Elem()
-		if len(expr.Elts) == 0 {
-			return val.Interface(), err
-		}
-		if val.Kind() == reflect.Struct && len(expr.Elts) != val.NumField() {
-			return nil, fmt.Errorf("invalid field count (expected %d, got %d)", val.NumField(), len(expr.Elts))
-		}
-		for i, elt := range expr.Elts {
-			f, err := loadTypespecFromAST(elt)
-			if err != nil {
-				return nil, err
+const (
+	fuzzMaxDepth = 3
+	fuzzMaxInput = 4096
+)
+
+type fuzzGenerator struct {
+	data string
+	pos  int
+}
+
+// Exhaustion supplies zeros instead of rejecting short inputs or reseeding a
+// PRNG: nearby byte mutations should make nearby changes to a generated case.
+func (g *fuzzGenerator) next() byte {
+	if g.pos == len(g.data) {
+		return 0
+	}
+	b := g.data[g.pos]
+	g.pos++
+	return b
+}
+
+func (g *fuzzGenerator) choose(n int) int { return int(g.next()) % n }
+
+var fuzzNumbers = []reflect.Type{
+	reflect.TypeOf(int(0)), reflect.TypeOf(int8(0)), reflect.TypeOf(int16(0)),
+	reflect.TypeOf(int32(0)), reflect.TypeOf(int64(0)), reflect.TypeOf(uint(0)),
+	reflect.TypeOf(uint8(0)), reflect.TypeOf(uint16(0)), reflect.TypeOf(uint32(0)),
+	reflect.TypeOf(uint64(0)), reflect.TypeOf(float32(0)), reflect.TypeOf(float64(0)),
+}
+
+var fuzzMapKeys = []reflect.Type{reflect.TypeOf(""), reflect.TypeOf(int(0)), reflect.TypeOf(uint(0))}
+var fuzzAnyType = reflect.TypeFor[any]()
+
+// Generate related types so fields match and most inputs can be converted by
+// JSON. Numeric types can differ; containers compose recursively. Depth and
+// width bounds limit type sizes. Fixed names/tags keep value mutations from
+// creating unnecessary entries in reflection's permanent type cache.
+func (g *fuzzGenerator) types(depth int) (reflect.Type, reflect.Type) {
+	kinds := 8
+	if depth >= fuzzMaxDepth {
+		kinds = 3
+	}
+	switch g.choose(kinds) {
+	case 0:
+		return reflect.TypeOf(""), reflect.TypeOf("")
+	case 1:
+		return reflect.TypeOf(false), reflect.TypeOf(false)
+	case 2:
+		return fuzzNumbers[g.choose(len(fuzzNumbers))], fuzzNumbers[g.choose(len(fuzzNumbers))]
+	case 3:
+		in, out := g.types(depth + 1)
+		return reflect.SliceOf(in), reflect.SliceOf(out)
+	case 4:
+		inKey, outKey := fuzzMapKeys[g.choose(len(fuzzMapKeys))], fuzzMapKeys[g.choose(len(fuzzMapKeys))]
+		in, out := g.types(depth + 1)
+		return reflect.MapOf(inKey, in), reflect.MapOf(outKey, out)
+	case 5:
+		inFields := make([]reflect.StructField, 1+g.choose(3))
+		outFields := make([]reflect.StructField, len(inFields))
+		for i := range inFields {
+			name := fmt.Sprintf("F%d", i)
+			jsonName := fmt.Sprintf("field%d", i)
+			tags := []string{"", jsonName, jsonName + ",omitempty", "-", jsonName + ",string", "FIELD" + fmt.Sprint(i), "shared"}
+			tag := g.choose(len(tags))
+			in, out := g.types(depth + 1)
+			field := reflect.StructField{Name: name, Type: in}
+			if tag != 0 {
+				field.Tag = reflect.StructTag(fmt.Sprintf("json:%q", tags[tag]))
 			}
-			inVal := reflect.ValueOf(f)
-			if !inVal.IsValid() {
-				return nil, fmt.Errorf("invalid value")
-			}
-			switch val.Kind() {
-			case reflect.Slice:
-				if inVal.CanConvert(val.Type()) {
-					val = reflect.Append(val, inVal)
-				}
-			case reflect.Struct:
-				if val.Field(i).CanSet() && inVal.CanConvert(val.Field(i).Type()) {
-					val.Field(i).Set(inVal.Convert(val.Field(i).Type()))
-				}
-			case reflect.Map:
-				if inVal.Kind() != reflect.Map {
-					return nil, fmt.Errorf("invalid conversion: map to %q", inVal.Kind())
-				}
-				for _, key := range inVal.MapKeys() {
-					mapVal := inVal.MapIndex(key)
-					if val.IsNil() {
-						val = reflect.MakeMap(val.Type())
-					}
-					if key.CanConvert(val.Type().Key()) && mapVal.CanConvert(val.Type().Elem()) {
-						val.SetMapIndex(key.Convert(val.Type().Key()), mapVal.Convert(val.Type().Elem()))
-					}
-				}
-			default:
-				return nil, fmt.Errorf("unexpected kind %q", val.Kind())
-			}
+			inFields[i] = field
+			field.Type = out
+			outFields[i] = field
 		}
-		if val.CanAddr() {
-			return val.Addr().Interface(), nil
-		}
-		return val.Interface(), nil
-	case *ast.BasicLit:
-		switch expr.Kind {
-		case token.STRING:
-			val, err := strconv.Unquote(expr.Value)
-			if err != nil {
-				return nil, err
-			}
-			return val, nil
-		case token.INT:
-			val, err := strconv.Atoi(expr.Value)
-			if err != nil {
-				return nil, err
-			}
-			return val, nil
-		case token.FLOAT:
-			val, err := strconv.ParseFloat(expr.Value, 64)
-			if err != nil {
-				return nil, err
-			}
-			return val, nil
-		}
-	case *ast.GenDecl:
-		if len(expr.Specs) != 1 {
-			return nil, fmt.Errorf("unexpected specs count %d", len(expr.Specs))
-		}
-		return loadTypespecFromAST(expr.Specs[0])
-	case *ast.StructType:
-		fields, err := loadTypespecFromAST(expr.Fields)
-		if err != nil {
-			return nil, err
-		}
-		structFields := fields.([]reflect.StructField)
-		seen := map[string]bool{}
-		for _, f := range structFields {
-			if seen[f.Name] {
-				return nil, fmt.Errorf("duplicate field name %q", f.Name)
-			}
-			seen[f.Name] = true
-			if !isValidFieldName(f.Name) {
-				return nil, fmt.Errorf("invalid field name %q", f.Name)
-			}
-		}
-		return reflect.StructOf(fields.([]reflect.StructField)), nil
-	case *ast.ArrayType:
-		arrayType, err := loadTypespecFromAST(expr.Elt)
-		if err != nil {
-			return nil, err
-		}
-		return reflect.SliceOf(arrayType.(reflect.Type)), nil
-	case *ast.MapType:
-		keyType, err := loadTypespecFromAST(expr.Key)
-		if err != nil {
-			return nil, err
-		}
-		if !keyType.(reflect.Type).Comparable() {
-			return nil, fmt.Errorf("invalid key type %v", keyType)
-		}
-		valType, err := loadTypespecFromAST(expr.Value)
-		if err != nil {
-			return nil, err
-		}
-		mapType := reflect.MapOf(keyType.(reflect.Type), valType.(reflect.Type))
-		return mapType, nil
-	case *ast.KeyValueExpr:
-		keyVal, err := loadTypespecFromAST(expr.Key)
-		if err != nil {
-			return nil, err
-		}
-		valVal, err := loadTypespecFromAST(expr.Value)
-		if err != nil {
-			return nil, err
-		}
-		key := reflect.ValueOf(keyVal)
-		if !key.IsValid() {
-			return nil, fmt.Errorf("Invalid key %v", keyVal)
-		}
-		val := reflect.ValueOf(valVal)
-		if !val.IsValid() {
-			return nil, fmt.Errorf("invalid val %v", valVal)
-		}
-		mapVal := reflect.MakeMap(reflect.MapOf(reflect.TypeOf(keyVal), reflect.TypeOf(valVal)))
-		mapVal.SetMapIndex(reflect.ValueOf(keyVal), reflect.ValueOf(valVal))
-		return mapVal.Interface(), nil
-	case *ast.FieldList:
-		var fields []reflect.StructField
-		for _, field := range expr.List {
-			val, err := loadTypespecFromAST(field)
-			if err != nil {
-				return nil, err
-			}
-			fields = append(fields, val.(reflect.StructField))
-		}
-		return fields, nil
-	case *ast.StarExpr:
-		val, err := loadTypespecFromAST(expr.X)
-		if err != nil {
-			return nil, err
-		}
-		if asType, ok := val.(reflect.Type); ok {
-			return reflect.PointerTo(asType), nil
-		}
-		return nil, fmt.Errorf("unexpected return type %v", reflect.TypeOf(val))
-	case *ast.Field:
-		if len(expr.Names) != 1 {
-			return nil, fmt.Errorf("unexpected number of names %d", len(expr.Names))
-		}
-		if expr.Names[0].Name == "" {
-			return nil, fmt.Errorf("no name for struct field")
-		}
-		var tag reflect.StructTag
-		if expr.Tag != nil {
-			tagVal, err := loadTypespecFromAST(expr.Tag)
-			if err != nil {
-				return nil, err
-			}
-			tag = reflect.StructTag(tagVal.(string))
-		}
-		fieldType, err := loadTypespecFromAST(expr.Type)
-		if err != nil {
-			return nil, err
-		}
-		pkgPath := ""
-		c := expr.Names[0].Name[0]
-		if 'a' <= c && c <= 'z' || c == '_' {
-			pkgPath = "goloose"
-		}
-		val := reflect.StructField{
-			Name:    expr.Names[0].Name,
-			Type:    fieldType.(reflect.Type),
-			Tag:     tag,
-			PkgPath: pkgPath,
-		}
-		return val, nil
-	case *ast.Ident:
-		switch expr.Name {
-		case "int":
-			return reflect.TypeOf(int(0)), nil
-		case "string":
-			return reflect.TypeOf(""), nil
-		case "float64":
-			return reflect.TypeOf(float64(0)), nil
-		case "any":
-			return reflect.TypeOf(new(any)).Elem(), nil
-		}
-		return nil, fmt.Errorf("unexpected ident name %q", expr.Name)
+		return reflect.StructOf(inFields), reflect.StructOf(outFields)
+	case 6:
+		in, out := g.types(depth + 1)
+		return reflect.PointerTo(in), reflect.PointerTo(out)
 	default:
-		return nil, fmt.Errorf("unhandled type %q", reflect.TypeOf(expr))
+		return fuzzAnyType, fuzzAnyType
 	}
-	return nil, fmt.Errorf("shouldn't get here")
 }
 
-func isValidFieldName(fieldName string) bool {
-	for i, c := range fieldName {
-		if i == 0 && !isLetter(c) {
-			return false
+func (g *fuzzGenerator) value(typ reflect.Type) reflect.Value {
+	v := reflect.New(typ).Elem()
+	switch typ.Kind() {
+	case reflect.String:
+		n := g.choose(33)
+		if n > len(g.data)-g.pos {
+			n = len(g.data) - g.pos
 		}
+		v.SetString(g.data[g.pos : g.pos+n])
+		g.pos += n
+	case reflect.Bool:
+		v.SetBool(g.choose(2) != 0)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		var n int64
+		switch g.choose(4) {
+		case 0:
+			n = int64(int8(g.next()))
+		case 1:
+			n = 1<<(typ.Bits()-1) - 1
+		case 2:
+			n = -1 << (typ.Bits() - 1)
+		case 3:
+			n = 0
+		}
+		v.SetInt(n)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		var n uint64
+		switch g.choose(3) {
+		case 0:
+			n = uint64(g.next())
+		case 1:
+			n = 1<<typ.Bits() - 1
+		}
+		v.SetUint(n)
+	case reflect.Float32, reflect.Float64:
+		var n float64
+		switch g.choose(5) {
+		case 0:
+			n = float64(int8(g.next()))
+		case 1:
+			n = float64(int8(g.next())) / 10
+		case 2:
+			n = math.Copysign(0, -1)
+		case 3:
+			n = math.SmallestNonzeroFloat32
+		case 4:
+			n = math.MaxFloat32
+		}
+		v.SetFloat(n)
+	case reflect.Ptr:
+		if g.choose(4) != 0 {
+			v.Set(reflect.New(typ.Elem()))
+			v.Elem().Set(g.value(typ.Elem()))
+		}
+	case reflect.Slice, reflect.Map:
+		// Distinguish nil, empty, and 1-3 elements.
+		n := g.choose(5)
+		if n == 0 {
+			return v
+		}
+		n--
+		if typ.Kind() == reflect.Slice {
+			v.Set(reflect.MakeSlice(typ, n, n))
+			for i := 0; i < n; i++ {
+				v.Index(i).Set(g.value(typ.Elem()))
+			}
+		} else {
+			v.Set(reflect.MakeMapWithSize(typ, n))
+			for i := 0; i < n; i++ {
+				key := g.value(typ.Key())
+				v.SetMapIndex(key, g.value(typ.Elem()))
+			}
+		}
+	case reflect.Struct:
+		for i := 0; i < v.NumField(); i++ {
+			v.Field(i).Set(g.value(typ.Field(i).Type))
+		}
+	case reflect.Interface:
+		// A finite set of concrete payloads keeps interface recursion bounded.
+		types := []reflect.Type{reflect.TypeOf(""), reflect.TypeOf(false), reflect.TypeOf(int(0)),
+			reflect.TypeOf(float64(0)), reflect.TypeOf([]string{}), reflect.TypeOf(map[string]int{})}
+		if kind := g.choose(len(types) + 1); kind != 0 {
+			v.Set(g.value(types[kind-1]))
+		}
+	default:
+		panic(fmt.Sprintf("unexpected generated type %v", typ))
+	}
+	return v
+}
 
-		if !(isLetter(c) || unicode.IsDigit(c)) {
-			return false
+type fuzzCase struct {
+	in        any
+	got, want reflect.Value // independent pointers to the actual destination type
+}
+
+func generateFuzzCase(data string) fuzzCase {
+	if len(data) > fuzzMaxInput {
+		data = data[:fuzzMaxInput]
+	}
+	g := fuzzGenerator{data: data}
+	mode, populated := g.choose(4), g.choose(2) != 0
+	inType, outType := g.types(0)
+	in := g.value(inType).Interface()
+	switch mode {
+	case 1:
+		outType = fuzzAnyType
+	case 2:
+		switch inType.Kind() {
+		case reflect.Struct, reflect.Map:
+			outType = reflect.TypeOf(map[string]any{})
+		case reflect.Slice:
+			outType = reflect.TypeOf([]any{})
+		default:
+			outType = fuzzAnyType
+		}
+	case 3:
+		// Exercise map/slice/interface inputs going into concrete Go types too.
+		encoded, err := json.Marshal(in)
+		if err != nil {
+			panic(err)
+		}
+		in = nil
+		if err := json.Unmarshal(encoded, &in); err != nil {
+			panic(err)
 		}
 	}
-
-	return len(fieldName) > 0
-}
-func isLetter(ch rune) bool {
-	return 'a' <= ch && ch <= 'z' || 'A' <= ch && ch <= 'Z' || ch == '_' || ch >= utf8.RuneSelf && unicode.IsLetter(ch)
-}
-
-func stringInList(strs []string, s string) bool {
-	for _, str := range strs {
-		if str == s {
-			return true
-		}
+	got, want := reflect.New(outType), reflect.New(outType)
+	if populated {
+		// Replaying value generation allocates separate maps, slices, and
+		// pointers. A shallow copy could let one conversion corrupt the oracle.
+		initial := g
+		got.Elem().Set(g.value(outType))
+		want.Elem().Set(initial.value(outType))
 	}
-	return false
+	return fuzzCase{in: in, got: got, want: want}
 }

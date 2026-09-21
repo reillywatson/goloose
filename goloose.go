@@ -2,13 +2,16 @@ package goloose
 
 import (
 	"encoding"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 type Options struct {
@@ -50,11 +53,8 @@ func ToStruct(in, out interface{}, options ...Options) error {
 	}
 
 	inVal := reflect.ValueOf(in)
-	if isNil(inVal) {
-		return nil
-	}
 	outVal := reflect.ValueOf(out)
-	if outVal.Kind() != reflect.Ptr {
+	if outVal.Kind() != reflect.Ptr || outVal.IsNil() {
 		return fmt.Errorf("non-pointer type %T passed to ToStruct", out)
 	}
 
@@ -73,6 +73,9 @@ func ToStruct(in, out interface{}, options ...Options) error {
 func fastPathMapStringAny(in, out any, opt Options) (handled bool) {
 	switch out := out.(type) {
 	case *any:
+		if out == nil {
+			return false
+		}
 		if *out == nil && in != nil {
 			switch in := in.(type) {
 			case map[string]string:
@@ -93,6 +96,9 @@ func fastPathMapStringAny(in, out any, opt Options) (handled bool) {
 			}
 		}
 	case *map[string]any:
+		if out == nil {
+			return false
+		}
 		switch in := in.(type) {
 		case map[string]string:
 			fastPathMapStringAnyImpl(in, out, opt.Transforms)
@@ -109,6 +115,7 @@ func fastPathMapStringAny(in, out any, opt Options) (handled bool) {
 }
 
 func fastPathMapStringAnyImpl[E string | float64 | int](in map[string]E, out *map[string]any, transforms []TransformFunc) {
+	in = normalizeStringMap(reflect.ValueOf(in)).Interface().(map[string]E)
 	if *out == nil && in != nil {
 		*out = make(map[string]any, len(in))
 	}
@@ -116,6 +123,9 @@ func fastPathMapStringAnyImpl[E string | float64 | int](in map[string]E, out *ma
 		var val any = v
 		for _, fn := range transforms {
 			val = fn(val)
+		}
+		if s, ok := val.(string); ok && !utf8.ValidString(s) {
+			val = replaceInvalidUTF8(s)
 		}
 		(*out)[k] = val
 	}
@@ -131,14 +141,20 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 	if recursionLevel > maxRecursionLevel {
 		return fmt.Errorf("maximum recursion level reached, you likely have a pointer cycle in your data structure")
 	}
-	if !in.IsValid() || !in.CanInterface() {
+	if !in.IsValid() {
+		return unmarshalNull(out)
+	}
+	if !in.CanInterface() {
 		return nil
 	}
 	for _, fn := range options.Transforms {
 		in = reflect.ValueOf(fn(in.Interface()))
 		if !in.IsValid() {
-			return nil
+			return unmarshalNull(out)
 		}
+	}
+	if isJSONNull(in) {
+		return unmarshalNull(out)
 	}
 
 	if handled := fastPathMapStringAny(in.Interface(), out.Interface(), options); handled {
@@ -149,6 +165,11 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 	outType := out.Type()
 	if handled, err := customJson(in, inType, out, outType); handled {
 		return err
+	}
+	if in.Kind() == reflect.Slice && inType.Elem().Kind() == reflect.Uint8 &&
+		!hasJSONMarshaler(reflect.PointerTo(inType.Elem())) {
+		in = reflect.ValueOf(base64.StdEncoding.EncodeToString(in.Bytes()))
+		inType = in.Type()
 	}
 
 	if out.Kind() == reflect.Ptr {
@@ -165,20 +186,21 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 		out.Set(reflect.Zero(outType))
 		return nil
 	}
+	if in.Kind() == reflect.Ptr || in.Kind() == reflect.Interface {
+		return toStructImpl(in.Elem(), out, options, recursionLevel+1)
+	}
+	if in.Kind() == reflect.String && out.Kind() == reflect.Slice && outType.Elem().Kind() == reflect.Uint8 {
+		decoded, err := base64.StdEncoding.DecodeString(in.String())
+		if err != nil {
+			return err
+		}
+		out.SetBytes(decoded)
+		return nil
+	}
 	if out.Kind() == reflect.Interface {
 		if out.IsNil() {
 			var outVal reflect.Value
 
-			for inType.Kind() == reflect.Ptr {
-				if isNil(in) {
-					return nil
-				}
-				in = in.Elem()
-				inType = in.Type()
-			}
-			if isNil(in) {
-				return nil
-			}
 			inType = toJsonType(inType)
 			switch inType.Kind() {
 			case reflect.Struct, reflect.Map:
@@ -220,11 +242,20 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 		fields := cachedTypeFields(inType)
 		for _, field := range fields {
 			val := fieldByIndex(in, field.index, false)
+			if !val.IsValid() {
+				continue // The field is behind a nil embedded pointer and is absent from JSON.
+			}
 			if field.omitEmpty && isEmptyValue(val) {
 				continue
 			}
-			if field.quoted {
-				val = dequote(val)
+			if field.quoted && !hasJSONMarshaler(val.Type()) {
+				if !isJSONNull(val) {
+					encoded, err := json.Marshal(val.Interface())
+					if err != nil {
+						return &skipValError{err: err}
+					}
+					val = reflect.ValueOf(string(encoded))
+				}
 			}
 			if val.Kind() == reflect.Interface {
 				val = val.Elem()
@@ -254,10 +285,7 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				if matchIdxs, ok := outFieldsByLower[field.namelower]; ok {
 					for _, idx := range matchIdxs {
 						outfield := outFields[idx]
-						if val.Kind() == reflect.Ptr && val.IsNil() {
-							continue
-						}
-						err := toStructImpl(val, fieldByIndex(out, outfield.index, true), options, recursionLevel+1)
+						err := setStructField(val, fieldByIndex(out, outfield.index, true), outfield.quoted, options, recursionLevel+1)
 						if err != nil {
 							return err
 						}
@@ -265,11 +293,15 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				}
 			}
 		}
+		if out.Kind() == reflect.Map && out.IsNil() {
+			out.Set(reflect.MakeMap(outType))
+		}
 
 	case reflect.Map:
 		if out.Kind() != reflect.Map && out.Kind() != reflect.Struct {
 			return nil
 		}
+		in = normalizeStringMap(in)
 		var lastErr error
 		outIsMap := out.Kind() == reflect.Map
 		var outKeyType, outElemType reflect.Type
@@ -297,15 +329,41 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				return &skipValError{err: &json.UnsupportedTypeError{Type: inKeyType}}
 			}
 		}
+		if outIsMap && in.Len() == 0 && out.IsNil() {
+			out.Set(reflect.MakeMap(outType))
+		}
+		var orderedKeys []reflect.Value
+		if outIsMap && keyKind == reflect.String && outKeyType.Kind() != reflect.String && outKeyType.Kind() != reflect.Interface {
+			// Different spellings such as "0" and "00" can decode to the same
+			// integer key. JSON visits the original keys in lexical order.
+			orderedKeys = in.MapKeys()
+			sort.Slice(orderedKeys, func(i, j int) bool { return orderedKeys[i].String() < orderedKeys[j].String() })
+		}
 		iter := in.MapRange()
-		for iter.Next() {
-			key := iter.Key()
+		for i := 0; ; i++ {
+			var key, val reflect.Value
+			if orderedKeys != nil {
+				if i == len(orderedKeys) {
+					break
+				}
+				key = orderedKeys[i]
+				val = in.MapIndex(key)
+			} else {
+				if !iter.Next() {
+					break
+				}
+				key, val = iter.Key(), iter.Value()
+			}
 			var keyStr string
 			var outKey reflect.Value
 			if outIsMap && directKey {
 				outKey = key
 			} else {
 				if keyKind == reflect.Interface {
+					key = key.Elem()
+					if !key.IsValid() {
+						return &skipValError{err: &json.UnsupportedTypeError{Type: inKeyType}}
+					}
 					switch key.Kind() {
 					case reflect.String:
 						keyStr = key.String()
@@ -327,13 +385,12 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 					}
 				}
 			}
-			val := iter.Value()
 			if val.Kind() == reflect.Interface && !val.IsNil() {
 				val = val.Elem()
 			}
 			switch out.Kind() {
 			case reflect.Map:
-				outVal := reflect.New(toJsonType(outElemType))
+				outVal := reflect.New(outElemType)
 				err := toStructImpl(val, outVal, options, recursionLevel+1)
 				var skipErr *skipValError
 				if errors.As(err, &skipErr) {
@@ -344,6 +401,11 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 					case reflect.String:
 						outKey = reflect.New(outKeyType).Elem()
 						outKey.SetString(keyStr)
+					case reflect.Interface:
+						if outKeyType.NumMethod() != 0 {
+							return &json.UnmarshalTypeError{Value: "object", Type: outType}
+						}
+						outKey = reflect.ValueOf(keyStr)
 					case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 						n, err := strconv.ParseInt(keyStr, 10, 64)
 						if err != nil || outKeyType.OverflowInt(n) {
@@ -370,7 +432,7 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 						outMap := reflect.MakeMapWithSize(outType, in.Len())
 						out.Set(outMap)
 					}
-					out.SetMapIndex(outKey, outVal.Elem().Convert(outElemType))
+					out.SetMapIndex(outKey, outVal.Elem())
 				}
 			case reflect.Struct:
 				keyStr = strings.ToLower(keyStr)
@@ -382,13 +444,7 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				if matchIdxs, ok := outFieldsByLower[keyStr]; ok {
 					for _, idx := range matchIdxs {
 						field := outFields[idx]
-						if field.quoted {
-							val = dequote(val)
-						}
-						if val.Kind() == reflect.Ptr && val.IsNil() {
-							continue
-						}
-						err := toStructImpl(val, fieldByIndex(out, field.index, true), options, recursionLevel+1)
+						err := setStructField(val, fieldByIndex(out, field.index, true), field.quoted, options, recursionLevel+1)
 						if err != nil {
 							return err
 						}
@@ -401,10 +457,14 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 		if out.Kind() != reflect.Slice {
 			return nil
 		}
-		if out.IsNil() || out.Len() != in.Len() {
-			outSlice := reflect.MakeSlice(outType, in.Len(), in.Cap())
-			out.Set(outSlice)
+		if in.Len() == 0 {
+			out.Set(reflect.MakeSlice(outType, 0, 0))
+			return nil
 		}
+		if in.Len() > out.Cap() {
+			out.Grow(in.Len() - out.Len())
+		}
+		out.SetLen(in.Len())
 		for i := 0; i < in.Len(); i++ {
 			val := in.Index(i)
 			err := toStructImpl(val, out.Index(i), options, recursionLevel+1)
@@ -434,13 +494,132 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 
 type skipValError struct{ err error }
 
+func setStructField(in, out reflect.Value, quoted bool, options Options, recursionLevel int) error {
+	if !quoted || isJSONNull(in) {
+		return toStructImpl(in, out, options, recursionLevel)
+	}
+	var literal string
+	if in.Kind() == reflect.String && !hasJSONMarshaler(in.Type()) {
+		literal = in.String()
+	} else {
+		encoded, err := json.Marshal(in.Interface())
+		if err != nil {
+			return &skipValError{err: err}
+		}
+		var text *string
+		if err := json.Unmarshal(encoded, &text); err != nil {
+			return err
+		}
+		if text == nil {
+			return unmarshalNull(out)
+		}
+		literal = *text
+	}
+	if literal == "null" {
+		return unmarshalNull(out)
+	}
+	// Decode the inner JSON using its actual destination type, avoiding float64
+	// rounding for integers and correctly unescaping quoted string fields.
+	decoded := reflect.New(out.Type())
+	if err := json.Unmarshal([]byte(literal), decoded.Interface()); err != nil {
+		return err
+	}
+	return toStructImpl(decoded.Elem(), out, options, recursionLevel)
+}
+
 func (e *skipValError) Unwrap() error { return e.err }
 func (e *skipValError) Error() string { return e.err.Error() }
 
 var trueVal = reflect.ValueOf(true)
 var falseVal = reflect.ValueOf(false)
 
+// JSON replaces each invalid UTF-8 byte with U+FFFD. Converting through runes
+// preserves that behavior even for consecutive invalid bytes, while valid
+// strings can be returned without allocating.
+func replaceInvalidUTF8(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	return string([]rune(s))
+}
+
+func hasInvalidStringKey[V any](m map[string]V) bool {
+	for k := range m {
+		if !utf8.ValidString(k) {
+			return true
+		}
+	}
+	return false
+}
+
+// JSON sorts the original keys before replacing invalid UTF-8. Sorting this
+// rare path makes collisions after replacement choose the same final value.
+func normalizeStringMap(in reflect.Value) reflect.Value {
+	if in.Type().Key().Kind() != reflect.String {
+		return in
+	}
+	invalid := false
+	switch m := in.Interface().(type) {
+	case map[string]string:
+		invalid = hasInvalidStringKey(m)
+	case map[string]int:
+		invalid = hasInvalidStringKey(m)
+	case map[string]float64:
+		invalid = hasInvalidStringKey(m)
+	case map[string]any:
+		invalid = hasInvalidStringKey(m)
+	default:
+		iter := in.MapRange()
+		for iter.Next() {
+			if !utf8.ValidString(iter.Key().String()) {
+				invalid = true
+				break
+			}
+		}
+	}
+	if !invalid {
+		return in
+	}
+	keys := in.MapKeys()
+	sort.Slice(keys, func(i, j int) bool { return keys[i].String() < keys[j].String() })
+	normalized := reflect.MakeMapWithSize(in.Type(), in.Len())
+	for _, key := range keys {
+		name := reflect.New(key.Type()).Elem()
+		name.SetString(replaceInvalidUTF8(key.String()))
+		normalized.SetMapIndex(name, in.MapIndex(key))
+	}
+	return normalized
+}
+
 func tryToConvert(in reflect.Value, inType reflect.Type, out reflect.Value, outType reflect.Type, options Options) {
+	if (in.Kind() == reflect.Float32 || in.Kind() == reflect.Float64) && inType != outType {
+		// Conversion must use JSON's shortest decimal representation, which
+		// can differ from converting the underlying binary floating point value.
+		switch out.Kind() {
+		case reflect.Float32, reflect.Float64:
+			decimal := strconv.FormatFloat(in.Float(), 'g', -1, inType.Bits())
+			if n, err := strconv.ParseFloat(decimal, outType.Bits()); err == nil {
+				out.SetFloat(n)
+				return
+			}
+		case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+			decimal := strconv.FormatFloat(in.Float(), 'f', -1, inType.Bits())
+			if n, err := strconv.ParseInt(decimal, 10, outType.Bits()); err == nil {
+				out.SetInt(n)
+				return
+			}
+		case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+			decimal := strconv.FormatFloat(in.Float(), 'f', -1, inType.Bits())
+			if n, err := strconv.ParseUint(decimal, 10, outType.Bits()); err == nil {
+				out.SetUint(n)
+				return
+			}
+		}
+	}
+	if in.Kind() == reflect.String && out.Kind() == reflect.String {
+		out.SetString(replaceInvalidUTF8(in.String()))
+		return
+	}
 	if inType == outType {
 		out.Set(in)
 		return
@@ -519,6 +698,47 @@ func isNil(val reflect.Value) bool {
 	return false
 }
 
+// Pointers and interfaces can hide a null several levels down. Marshaler
+// methods take precedence over the underlying value (except on nil pointers).
+func isJSONNull(v reflect.Value) bool {
+	slow := v
+	for depth := 0; v.IsValid(); depth++ {
+		switch v.Kind() {
+		case reflect.Ptr, reflect.Interface:
+			if v.IsNil() {
+				return true
+			}
+		case reflect.Map, reflect.Slice:
+			if !v.IsNil() {
+				return false
+			}
+		default:
+			return false
+		}
+		if hasJSONMarshaler(v.Type()) {
+			return false
+		}
+		if v.Kind() == reflect.Map || v.Kind() == reflect.Slice {
+			return true
+		}
+		v = v.Elem()
+		if depth%2 == 1 {
+			slow = slow.Elem()
+		}
+		if v.Kind() == reflect.Ptr && slow.Kind() == reflect.Ptr && v.Type() == slow.Type() && v.Pointer() == slow.Pointer() {
+			return false // Let the conversion's recursion limit report cycles.
+		}
+	}
+	return true
+}
+
+func unmarshalNull(out reflect.Value) error {
+	if out.CanAddr() {
+		out = out.Addr()
+	}
+	return json.Unmarshal([]byte("null"), out.Interface())
+}
+
 var float64Type = reflect.TypeOf(float64(0))
 var stringType = reflect.TypeOf(string(""))
 var mapStringInterfaceType = reflect.TypeOf(map[string]interface{}{})
@@ -529,6 +749,10 @@ var jsonMarshalerType = reflect.TypeOf(new(json.Marshaler)).Elem()
 var jsonUnmarshalerType = reflect.TypeOf(new(json.Unmarshaler)).Elem()
 var textMarshalerType = reflect.TypeOf(new(encoding.TextMarshaler)).Elem()
 var textUnmarshalerType = reflect.TypeOf(new(encoding.TextUnmarshaler)).Elem()
+
+func hasJSONMarshaler(t reflect.Type) bool {
+	return t.Implements(jsonMarshalerType) || t.Implements(textMarshalerType)
+}
 
 func customJson(in reflect.Value, inType reflect.Type, out reflect.Value, outType reflect.Type) (bool, error) {
 	if !out.CanAddr() {
@@ -590,25 +814,4 @@ func timeFastPath(in reflect.Value, inType reflect.Type, out reflect.Value, outT
 		}
 	}
 	return false
-}
-
-func dequote(v reflect.Value) reflect.Value {
-	if v.Kind() != reflect.String {
-		return v
-	}
-	str := v.String()
-	if b, err := strconv.ParseBool(str); err == nil {
-		return reflect.ValueOf(b)
-	}
-	if i, err := strconv.ParseInt(str, 10, 64); err == nil {
-		return reflect.ValueOf(i)
-	}
-	if f, err := strconv.ParseFloat(str, 64); err == nil {
-		return reflect.ValueOf(f)
-	}
-	if !strings.HasPrefix(str, `"`) || !strings.HasSuffix(str, `"`) {
-		return v
-	}
-	str = str[1 : len(str)-1]
-	return reflect.ValueOf(str)
 }

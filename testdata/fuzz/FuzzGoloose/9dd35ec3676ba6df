@@ -1,0 +1,2 @@
+go test fuzz v1
+string("70%0020910000")
