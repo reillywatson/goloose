@@ -319,9 +319,13 @@ func cachedTypeFieldsEntry(t reflect.Type) fieldCacheEntry {
 		byLower[f.namelower] = append(byLower[f.namelower], i)
 	}
 	entry := fieldCacheEntry{fields: fields, byLower: byLower}
+	return storeTypeFieldsEntry(t, entry)
+}
 
+// Keep the first complete entry when concurrent callers compute the same type.
+func storeTypeFieldsEntry(t reflect.Type, entry fieldCacheEntry) fieldCacheEntry {
 	fieldCache.mu.Lock()
-	m, _ = fieldCache.value.Load().(map[reflect.Type]fieldCacheEntry)
+	m, _ := fieldCache.value.Load().(map[reflect.Type]fieldCacheEntry)
 	if existing, ok := m[t]; ok {
 		fieldCache.mu.Unlock()
 		return existing

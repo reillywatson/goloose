@@ -6,6 +6,7 @@ import (
 	"math"
 	"reflect"
 	"testing"
+	"time"
 )
 
 // Callers supply independent destinations, including any initial contents.
@@ -165,4 +166,36 @@ func TestJSONMarshalerTakesPrecedence(t *testing.T) {
 	}
 	var gotQuoted, wantQuoted quoted
 	checkJSONConversion(t, map[string]any{"Value": conformanceQuotedString("input")}, &gotQuoted, &wantQuoted)
+}
+
+func TestTimeConversionMatchesJSON(t *testing.T) {
+	// time.Now carries a monotonic reading, which JSON must discard. FixedZone
+	// also exercises reconstruction of timezone data instead of copying it.
+	for _, value := range []time.Time{time.Now(), time.Date(2026, 9, 21, 12, 34, 56, 789, time.FixedZone("custom", 3600))} {
+		for _, in := range []any{value, &value} {
+			for _, typ := range []reflect.Type{reflect.TypeFor[time.Time](), reflect.TypeFor[*time.Time](), reflect.TypeFor[string]()} {
+				t.Run(reflect.TypeOf(in).String()+"/"+typ.String(), func(t *testing.T) {
+					got, want := reflect.New(typ), reflect.New(typ)
+					checkJSONConversion(t, in, got.Interface(), want.Interface())
+				})
+			}
+		}
+	}
+}
+
+func TestTimeConversionRejectsInvalidValues(t *testing.T) {
+	invalidTime := time.Date(10000, 1, 1, 0, 0, 0, 0, time.UTC)
+	var text string
+	if err := ToStruct(invalidTime, &text); err == nil {
+		t.Fatal("invalid year should fail marshaling")
+	}
+	for _, text := range []string{"not a time", "2026-09-21T12:34:56+24:00"} {
+		var got, want time.Time
+		encoded, _ := json.Marshal(text)
+		wantErr := json.Unmarshal(encoded, &want)
+		gotErr := ToStruct(text, &got)
+		if (gotErr == nil) != (wantErr == nil) || !reflect.DeepEqual(got, want) {
+			t.Fatalf("%q: got %v (%v), want %v (%v)", text, got, gotErr, want, wantErr)
+		}
+	}
 }

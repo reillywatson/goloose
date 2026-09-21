@@ -2,12 +2,18 @@ package goloose
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"reflect"
+	"sort"
 	"strconv"
+	"strings"
+	"sync"
 	"testing"
 	"time"
+	"unsafe"
 )
 
 func toJson(in interface{}) string {
@@ -1128,5 +1134,385 @@ func TestMapAnyAnyToMapAnyAny(t *testing.T) {
 	}
 	if !reflect.DeepEqual(b, c) {
 		t.Errorf("Got %+v\nExpected %+v", b, c)
+	}
+}
+
+func TestToStructRejectsInvalidArguments(t *testing.T) {
+	for _, out := range []any{nil, 0, (*int)(nil)} {
+		if err := ToStruct(1, out); err == nil || !strings.Contains(err.Error(), "non-pointer") {
+			t.Fatalf("out %T: %v", out, err)
+		}
+	}
+	var out int
+	if err := ToStruct(1, &out, Options{}, Options{}); err == nil || !strings.Contains(err.Error(), "at most one") {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestFloatMapFastPaths(t *testing.T) {
+	in := map[string]float64{"a": 1.25, "b": -2}
+	var got, want any
+	checkJSONConversion(t, in, &got, &want)
+	var gotMap, wantMap map[string]any
+	checkJSONConversion(t, in, &gotMap, &wantMap)
+	gotMap, wantMap = map[string]any{"keep": true}, map[string]any{"keep": true}
+	checkJSONConversion(t, in, &gotMap, &wantMap)
+	for _, out := range []any{(*any)(nil), (*map[string]any)(nil)} {
+		if fastPathMapStringAny(in, out, Options{}) {
+			t.Fatalf("nil destination %T was handled", out)
+		}
+	}
+}
+
+func TestUnsupportedMapKeys(t *testing.T) {
+	for _, in := range []any{map[bool]int{true: 1}, map[any]int{nil: 1}, map[any]int{true: 1}} {
+		var out map[string]int
+		var unsupported *json.UnsupportedTypeError
+		if err := ToStruct(in, &out); !errors.As(err, &unsupported) {
+			t.Fatalf("input %T: got %v", in, err)
+		}
+		if out != nil {
+			t.Fatalf("unsupported key inserted: %v", out)
+		}
+	}
+}
+
+func TestNumericMapKeys(t *testing.T) {
+	for _, in := range []any{map[uint]int{12: 3}, map[any]int{uint(12): 3}} {
+		var got map[string]int
+		if err := ToStruct(in, &got); err != nil {
+			t.Fatal(err)
+		}
+		if !reflect.DeepEqual(got, map[string]int{"12": 3}) {
+			t.Fatalf("got %v", got)
+		}
+	}
+	var got, want map[uint8]int
+	checkJSONConversion(t, map[string]int{"0": 1, "12": 2, "255": 3}, &got, &want)
+	for _, key := range []string{"256", "-1", "invalid"} {
+		var out map[uint8]int
+		var typeErr *json.UnmarshalTypeError
+		if err := ToStruct(map[string]int{key: 1}, &out); !errors.As(err, &typeErr) {
+			t.Fatalf("key %q: %v", key, err)
+		}
+		if len(out) != 0 {
+			t.Fatalf("invalid key inserted: %v", out)
+		}
+	}
+	for _, out := range []any{new(map[fmt.Stringer]int), new(map[bool]int)} {
+		var typeErr *json.UnmarshalTypeError
+		if err := ToStruct(map[string]int{"1": 2}, out); !errors.As(err, &typeErr) {
+			t.Fatalf("out %T: %v", out, err)
+		}
+	}
+}
+
+func TestConversionErrorsPropagate(t *testing.T) {
+	cases := []struct {
+		name    string
+		in, out any
+	}{
+		{"base64", "%%%", new([]byte)},
+		{"quoted input", struct {
+			Value float64 `json:",string"`
+		}{math.Inf(1)}, new(map[string]any)},
+		{"struct field", struct{ Value cantMarshal }{}, new(struct{ Value int })},
+		{"slice element", []cantMarshal{{}}, new([]int)},
+		{"quoted marshaler", map[string]any{"Value": cantMarshal{}}, new(struct {
+			Value int `json:",string"`
+		})},
+		{"quoted nonstring", map[string]any{"Value": 123}, new(struct {
+			Value int `json:",string"`
+		})},
+		{"quoted invalid literal", map[string]any{"Value": "invalid"}, new(struct {
+			Value int `json:",string"`
+		})},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := ToStruct(tc.in, tc.out); err == nil {
+				t.Fatal("expected an error")
+			}
+		})
+	}
+}
+
+type nullJSONValue int
+
+func (nullJSONValue) MarshalJSON() ([]byte, error) { return []byte("null"), nil }
+
+func TestQuotedNull(t *testing.T) {
+	for _, value := range []any{"null", nullJSONValue(1), nil} {
+		in := map[string]any{"Value": value}
+		got, want := struct {
+			Value int `json:",string"`
+		}{42}, struct {
+			Value int `json:",string"`
+		}{42}
+		checkJSONConversion(t, in, &got, &want)
+	}
+}
+
+func TestStructInterfaceFields(t *testing.T) {
+	in := struct {
+		Value any
+		Null  any
+	}{Value: "hello"}
+	var got, want map[string]any
+	checkJSONConversion(t, in, &got, &want)
+}
+
+func TestMismatchedContainersLeaveScalarUnchanged(t *testing.T) {
+	for _, in := range []any{struct{ Value int }{1}, map[string]int{"value": 1}, []int{1}} {
+		out := 42
+		if err := ToStruct(in, &out); err != nil {
+			t.Fatal(err)
+		}
+		if out != 42 {
+			t.Fatalf("%T changed destination: %v", in, out)
+		}
+	}
+}
+
+func TestUnsupportedKinds(t *testing.T) {
+	for _, tc := range []struct {
+		in      any
+		message string
+	}{
+		{[1]int{1}, "Array not supported yet!"},
+		{unsafe.Pointer(new(int)), "UnsafePointer not supported!"},
+	} {
+		t.Run(tc.message, func(t *testing.T) {
+			defer func() {
+				if got := recover(); got != tc.message {
+					t.Fatalf("panic = %v, want %q", got, tc.message)
+				}
+			}()
+			var out int
+			_ = ToStruct(tc.in, &out)
+		})
+	}
+	for _, in := range []any{make(chan int), func() {}} {
+		out := 42
+		if err := ToStruct(in, &out); err != nil || out != 42 {
+			t.Fatalf("%T: out %v, err %v", in, out, err)
+		}
+	}
+}
+
+func TestNamedStringMapNormalization(t *testing.T) {
+	type key string
+	type namedMap map[key]int
+	for _, in := range []any{namedMap{"\xff": 2, "\xfe": 1}, map[string]float64{"\xff": 2}} {
+		var got, want map[string]any
+		checkJSONConversion(t, in, &got, &want)
+	}
+}
+
+func TestFalseStringToBool(t *testing.T) {
+	out := true
+	if err := ToStruct("FaLsE", &out); err != nil || out {
+		t.Fatalf("got %v, err %v", out, err)
+	}
+}
+
+func TestSkipValueError(t *testing.T) {
+	cause := errors.New("failed to encode value")
+	err := &skipValError{err: cause}
+	if err.Error() != cause.Error() || !errors.Is(err, cause) {
+		t.Fatalf("wrapper lost cause: %v", err)
+	}
+}
+
+func TestUnexportedInputValueIsIgnored(t *testing.T) {
+	in := reflect.ValueOf(struct{ hidden int }{42}).Field(0)
+	out := 3
+	if err := toStructImpl(in, reflect.ValueOf(&out).Elem(), Options{}, 0); err != nil || out != 3 {
+		t.Fatalf("got %v, err %v", out, err)
+	}
+}
+
+func TestNullAndEmptyHelpers(t *testing.T) {
+	if !isJSONNull(reflect.Value{}) {
+		t.Fatal("invalid value should represent null")
+	}
+	out := 42
+	if err := toStructSlow(nil, &out); err != nil || out != 42 {
+		t.Fatalf("got %v, err %v", out, err)
+	}
+	for _, tc := range []struct {
+		v     any
+		empty bool
+	}{
+		{false, true}, {true, false}, {int64(0), true}, {int64(-1), false},
+		{uint64(0), true}, {uint64(1), false}, {float64(0), true}, {float64(1), false},
+		{(*int)(nil), true}, {new(int), false}, {struct{}{}, false},
+	} {
+		if got := isEmptyValue(reflect.ValueOf(tc.v)); got != tc.empty {
+			t.Fatalf("%#v: empty %v, want %v", tc.v, got, tc.empty)
+		}
+	}
+}
+
+func TestInterfaceRecursionLimitPreservesDestination(t *testing.T) {
+	var out any
+	err := toStructImpl(reflect.ValueOf(42), reflect.ValueOf(&out).Elem(), Options{}, maxRecursionLevel)
+	if err == nil || !strings.Contains(err.Error(), "maximum recursion level") {
+		t.Fatalf("expected recursion limit error, got %v", err)
+	}
+	if out != nil {
+		t.Fatalf("failed conversion changed destination: %v", out)
+	}
+}
+
+type nilMapWithJSONMethod map[string]int
+
+func (nilMapWithJSONMethod) MarshalJSON() ([]byte, error) { return []byte(`{"custom":42}`), nil }
+
+func TestNilMapMarshalerTakesPrecedence(t *testing.T) {
+	var in nilMapWithJSONMethod
+	var got, want any
+	checkJSONConversion(t, in, &got, &want)
+	var gotMap, wantMap map[string]int
+	checkJSONConversion(t, in, &gotMap, &wantMap)
+}
+
+func TestFieldIndexOrdering(t *testing.T) {
+	prefix := byIndex{{index: []int{1}}, {index: []int{1, 2}}}
+	if !prefix.Less(0, 1) || prefix.Less(1, 0) || prefix.Less(0, 0) {
+		t.Fatal("a prefix must sort before its extensions, but not before itself")
+	}
+	fields := byIndex{{index: []int{1, 2}}, {index: []int{0, 1}}, {index: []int{1}}, {index: []int{0}}, {index: []int{1}}}
+	sort.Sort(fields)
+	want := [][]int{{0}, {0, 1}, {1}, {1}, {1, 2}}
+	for i, f := range fields {
+		if !reflect.DeepEqual(f.index, want[i]) {
+			t.Fatalf("field %d: %v, want %v", i, f.index, want[i])
+		}
+	}
+}
+
+func TestFieldTagParsing(t *testing.T) {
+	for _, tc := range []struct {
+		tag   string
+		valid bool
+	}{
+		{"", false}, {"field", true}, {"日本語", true}, {"a b!", true}, {"bad\\name", false}, {"bad\"name", false}, {"bad\nname", false},
+	} {
+		if got := isValidTag(tc.tag); got != tc.valid {
+			t.Fatalf("%q: valid %v", tc.tag, got)
+		}
+	}
+	name, opts := parseTag("value,omitempty,string")
+	if name != "value" || !opts.Contains("omitempty") || !opts.Contains("string") || opts.Contains("omit") {
+		t.Fatalf("got name %q, options %q", name, opts)
+	}
+	if fieldByIndex(reflect.Value{}, []int{0}, false).IsValid() {
+		t.Fatal("invalid root should yield an invalid field")
+	}
+}
+
+func TestEmbeddedFieldDominance(t *testing.T) {
+	type Plain struct{ Value int }
+	type Tagged struct {
+		Other int `json:"Value"`
+	}
+	type Left struct{ Plain }
+	type Right struct{ Plain }
+	type Recursive struct {
+		*Recursive
+		Value int
+	}
+	for _, in := range []any{
+		struct {
+			Plain
+			Value int
+		}{Plain{1}, 2},
+		struct {
+			Plain
+			Tagged
+		}{Plain{1}, Tagged{2}},
+		struct {
+			Left
+			Right
+		}{Left{Plain{1}}, Right{Plain{2}}},
+		struct {
+			Plain
+			Left
+		}{Plain{1}, Left{Plain{2}}},
+		Recursive{Value: 3},
+	} {
+		t.Run(reflect.TypeOf(in).String(), func(t *testing.T) {
+			var got, want map[string]any
+			checkJSONConversion(t, in, &got, &want)
+		})
+	}
+}
+
+func TestDominantFieldSelection(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		fields []field
+		want   string
+		ok     bool
+	}{
+		{"single", []field{{name: "first", index: []int{0}}}, "first", true},
+		{"shallower", []field{{name: "first", index: []int{0}}, {name: "deep", index: []int{1, 0}}}, "first", true},
+		{"tag wins", []field{{name: "plain", index: []int{0}}, {name: "tagged", index: []int{1}, tag: true}}, "tagged", true},
+		{"plain conflict", []field{{index: []int{0}}, {index: []int{1}}}, "", false},
+		{"tag conflict", []field{{index: []int{0}, tag: true}, {index: []int{1}, tag: true}}, "", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := dominantField(tc.fields)
+			if ok != tc.ok || got.name != tc.want {
+				t.Fatalf("got %q, %v; want %q, %v", got.name, ok, tc.want, tc.ok)
+			}
+		})
+	}
+}
+
+func TestConcurrentFieldCache(t *testing.T) {
+	// Large fresh types make concurrent callers compute and publish the same
+	// metadata. All callers must observe identical complete entries.
+	fields := make([]reflect.StructField, 256)
+	for i := range fields {
+		fields[i] = reflect.StructField{Name: "Field" + strconv.Itoa(i), Type: reflect.TypeFor[int]()}
+	}
+	typ := reflect.StructOf(fields)
+	const workers = 32
+	start := make(chan struct{})
+	results := make(chan fieldCacheEntry, workers)
+	var wg sync.WaitGroup
+	for range workers {
+		wg.Add(1)
+		go func() { defer wg.Done(); <-start; results <- cachedTypeFieldsEntry(typ) }()
+	}
+	close(start)
+	wg.Wait()
+	close(results)
+	for entry := range results {
+		if len(entry.fields) != len(fields) || len(entry.byLower) != len(fields) {
+			t.Fatalf("incomplete entry: %d fields, %d names", len(entry.fields), len(entry.byLower))
+		}
+	}
+	if got := cachedTypeFieldsByLower(typ)["field0"]; !reflect.DeepEqual(got, []int{0}) {
+		t.Fatalf("wrong cached field index: %v", got)
+	}
+}
+
+func TestFieldCacheKeepsFirstEntry(t *testing.T) {
+	type record struct {
+		Value int `json:"stored"`
+	}
+	typ := reflect.TypeFor[record]()
+	first := cachedTypeFieldsEntry(typ)
+	// Simulate a second writer reaching publication after the first one. This
+	// checks the lost-race path deterministically, even with GOMAXPROCS=1.
+	got := storeTypeFieldsEntry(typ, fieldCacheEntry{})
+	if !reflect.DeepEqual(got, first) || len(got.fields) != 1 {
+		t.Fatalf("second writer replaced the published entry: %#v", got)
+	}
+	if !reflect.DeepEqual(cachedTypeFieldsEntry(typ), first) {
+		t.Fatal("second writer changed the cached entry")
 	}
 }

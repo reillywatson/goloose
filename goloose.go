@@ -10,7 +10,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -192,18 +191,10 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 	}
 
 	if out.Kind() == reflect.Ptr {
-		if (in.Kind() == reflect.Ptr || in.Kind() == reflect.Interface) && in.IsNil() && out.CanAddr() {
-			out.Set(reflect.Zero(outType))
-			return nil
-		}
 		if out.IsNil() {
 			out.Set(reflect.New(outType.Elem()))
 		}
 		return toStructImpl(in, out.Elem(), options, recursionLevel+1)
-	}
-	if isNil(in) {
-		out.Set(reflect.Zero(outType))
-		return nil
 	}
 	if in.Kind() == reflect.Ptr || in.Kind() == reflect.Interface {
 		return toStructImpl(in.Elem(), out, options, recursionLevel+1)
@@ -232,8 +223,6 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 				return err
 			case reflect.Slice:
 				outVal = reflect.New(interfaceSliceType)
-			case reflect.Interface:
-				return toStructImpl(in.Elem(), out, options, recursionLevel+1)
 			default:
 				outVal = reflect.New(inType).Elem()
 				err := toStructImpl(in, outVal, options, recursionLevel+1)
@@ -505,14 +494,8 @@ func toStructImpl(in, out reflect.Value, options Options, recursionLevel int) er
 		panic("Array not supported yet!")
 	case reflect.Chan, reflect.Func:
 		// do nothing
-	case reflect.Interface:
-		return toStructImpl(in.Elem(), out, options, recursionLevel+1)
-	case reflect.Ptr:
-		return toStructImpl(in.Elem(), out, options, recursionLevel+1)
 	case reflect.UnsafePointer:
 		panic("UnsafePointer not supported!")
-	default:
-		panic(fmt.Sprintf("Unknown kind %v", in.Kind()))
 	}
 	return nil
 }
@@ -713,16 +696,6 @@ func isEmptyValue(v reflect.Value) bool {
 	return false
 }
 
-func isNil(val reflect.Value) bool {
-	switch val.Kind() {
-	case reflect.Invalid:
-		return true
-	case reflect.Ptr, reflect.Interface, reflect.Map, reflect.Slice:
-		return val.IsNil()
-	}
-	return false
-}
-
 // Pointers and interfaces can hide a null several levels down. Marshaler
 // methods take precedence over the underlying value (except on nil pointers).
 func isJSONNull(v reflect.Value) bool {
@@ -768,8 +741,6 @@ var float64Type = reflect.TypeOf(float64(0))
 var stringType = reflect.TypeOf(string(""))
 var mapStringInterfaceType = reflect.TypeOf(map[string]interface{}{})
 var interfaceSliceType = reflect.TypeOf([]interface{}{})
-var timeType = reflect.TypeOf(time.Time{})
-var timePtrType = reflect.TypeOf(&time.Time{})
 var jsonMarshalerType = reflect.TypeOf(new(json.Marshaler)).Elem()
 var jsonUnmarshalerType = reflect.TypeOf(new(json.Unmarshaler)).Elem()
 var textMarshalerType = reflect.TypeOf(new(encoding.TextMarshaler)).Elem()
@@ -787,10 +758,6 @@ func customJson(in reflect.Value, inType reflect.Type, out reflect.Value, outTyp
 	inOk := inType.Implements(jsonMarshalerType) || inType.Implements(textMarshalerType)
 	outOk := outType.Implements(jsonUnmarshalerType) || outType.Implements(textUnmarshalerType)
 	if inOk || outOk {
-		if timeFastPath(in, inType, out, outType) {
-			return true, nil
-		}
-
 		b, err := json.Marshal(in.Interface())
 		if err != nil {
 			return true, &skipValError{err: err}
@@ -803,40 +770,4 @@ func customJson(in reflect.Value, inType reflect.Type, out reflect.Value, outTyp
 		return true, err
 	}
 	return false, nil
-}
-
-func timeFastPath(in reflect.Value, inType reflect.Type, out reflect.Value, outType reflect.Type) bool {
-	switch inType {
-	case timeType:
-		switch outType {
-		case timeType:
-			out.Set(in)
-			return true
-		case stringType:
-			t := in.Interface().(time.Time)
-			out.Set(reflect.ValueOf(t.Format(time.RFC3339Nano)))
-		}
-	case timePtrType:
-		switch outType {
-		case timePtrType:
-			if !in.IsNil() {
-				outVal := reflect.New(timeType)
-				outVal.Elem().Set(in.Elem())
-				out.Set(outVal)
-			} else {
-				out.Set(in)
-			}
-			return true
-		}
-	case stringType:
-		switch outType {
-		case timeType:
-			t, err := time.Parse(time.RFC3339Nano, in.String())
-			if err == nil {
-				out.Set(reflect.ValueOf(t))
-				return true
-			}
-		}
-	}
-	return false
 }
